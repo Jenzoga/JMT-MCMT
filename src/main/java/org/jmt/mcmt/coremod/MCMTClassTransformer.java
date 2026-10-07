@@ -378,6 +378,14 @@ public class MCMTClassTransformer implements IClassTransformer
 
     private void synchronizeOnTickList(ClassNode cn, String[] names, String desc)
     {
+        synchronizeOnField(cn, names, desc, "net/minecraft/world/WorldServer",
+                new String[] { "pendingTickListEntriesTreeSet", "field_73065_O" }, "Ljava/util/TreeSet;",
+                "pendingTickListEntriesTreeSet");
+    }
+
+    private void synchronizeOnField(ClassNode cn, String[] names, String desc, String fieldOwner,
+            String[] fieldNames, String fieldType, String logName)
+    {
         MethodNode m = null;
         for (MethodNode mn : cn.methods)
         {
@@ -396,21 +404,26 @@ public class MCMTClassTransformer implements IClassTransformer
         }
         if (m == null)
         {
-            LOG.error("sync target not found in WorldServer: " + names[0]);
+            LOG.error("sync target not found: " + names[0]);
             return;
         }
         String fieldName = null;
         for (FieldNode fn : cn.fields)
         {
-            if (fn.name.equals("pendingTickListEntriesTreeSet") || fn.name.equals("field_73065_O"))
+            for (String f : fieldNames)
             {
-                fieldName = fn.name;
-                break;
+                if (fn.name.equals(f))
+                {
+                    fieldName = fn.name;
+                    break;
+                }
             }
+            if (fieldName != null)
+                break;
         }
         if (fieldName == null)
         {
-            LOG.error("pendingTickListEntriesTreeSet field not found in WorldServer");
+            LOG.error(logName + " field not found in " + cn.name);
             return;
         }
         // Rename the original and emit a wrapper that runs it inside
@@ -427,7 +440,7 @@ public class MCMTClassTransformer implements IClassTransformer
         LabelNode handler = new LabelNode();
         b.add(start);
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
         b.add(new InsnNode(Opcodes.MONITORENTER));
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
         b.add(new LdcInsnNode(wrapperName + " enter"));
@@ -440,24 +453,23 @@ public class MCMTClassTransformer implements IClassTransformer
             v++;
             b.add(new VarInsnNode(t.getOpcode(Opcodes.ILOAD), v));
         }
-        b.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/world/WorldServer",
-                origName, desc, false));
+        b.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, cn.name, origName, desc, false));
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
         b.add(new LdcInsnNode(wrapperName + " exit"));
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
                 "(Ljava/lang/Object;Ljava/lang/String;)V", false));
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
         b.add(new InsnNode(Opcodes.MONITOREXIT));
         b.add(new InsnNode(Type.getReturnType(desc).getOpcode(Opcodes.IRETURN)));
         b.add(handler);
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
         b.add(new InsnNode(Opcodes.MONITOREXIT));
         b.add(new InsnNode(Opcodes.ATHROW));
         w.tryCatchBlocks.add(new TryCatchBlockNode(start, handler, handler, null));
         cn.methods.add(w);
-        LOG.info("Synchronized " + w.name + " on pendingTickListEntriesTreeSet");
+        LOG.info("Synchronized " + w.name + " on " + logName);
     }
 
     private byte[] patchWorld(byte[] in)
@@ -539,7 +551,27 @@ public class MCMTClassTransformer implements IClassTransformer
             LOG.error("ITickable.update call site not found in updateEntities");
         else
             LOG.info("Patched World: " + t + " TE tick dispatch site(s)");
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+
+        // entity list mutation sites: pool-thread spawn/remove must not race
+        // main-thread iteration of loadedEntityList (foamfix CME crash)
+        String[] entityField = { "loadedEntityList", "field_72996_f" };
+        synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
+                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "removeEntity", "func_72900_e" },
+                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "onEntityRemoved", "func_72847_b" },
+                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "removeEntityDangerously", "func_72973_f" },
+                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+
+        // COMPUTE_FRAMES: the loadedEntityList sync wrappers add try/catch
+        // handler entries that need stackmap frames (COMPUTE_MAXS leaves them
+        // missing -> VerifyError "Expecting a stackmap frame at branch target")
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
         cn.accept(cw);
         return cw.toByteArray();
     }
