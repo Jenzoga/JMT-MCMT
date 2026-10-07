@@ -229,20 +229,23 @@ public class MCMTClassTransformer implements IClassTransformer
             return in;
         }
 
-        // extract body (store..backEdge exclusive) into WorldServer.mcmt$tickEnvChunk(Chunk)V
+        // clone body (store..backEdge exclusive) into WorldServer.mcmt$tickEnvChunk(Chunk,IZZ)V.
+        // The original body STAYS in updateBlocks so later coremods that locate
+        // instructions by ordinal (e.g. RLTweaker's Chunk.onTick search) still
+        // find them; the guard below routes to the clone only when parallelEnv
+        // is enabled, otherwise vanilla code runs untouched.
         java.util.List<AbstractInsnNode> body = new java.util.ArrayList<>();
         for (AbstractInsnNode ain = store.getNext(); ain != backEdge; ain = ain.getNext())
             body.add(ain);
 
         MethodNode extracted = new MethodNode(Opcodes.ASM5, Opcodes.ACC_PUBLIC | Opcodes.ACC_SYNTHETIC,
                 "mcmt$tickEnvChunk", "(Lnet/minecraft/world/chunk/Chunk;IZZ)V", null, null);
-        for (AbstractInsnNode node : body)
-            ins.remove(node);
+        java.util.Map<LabelNode, LabelNode> labelMap = new java.util.IdentityHashMap<>();
         for (AbstractInsnNode node : body)
         {
             if (node instanceof FrameNode)
                 continue; // stale locals layout; COMPUTE_FRAMES recomputes
-            extracted.instructions.add(node);
+            extracted.instructions.add(node.clone(labelMap));
         }
 
         // remap outer locals to parameters: chunk->1, randomTickSpeed->2, raining->3, thundering->4
@@ -279,16 +282,21 @@ public class MCMTClassTransformer implements IClassTransformer
         extracted.instructions.add(new InsnNode(Opcodes.RETURN));
         cn.methods.add(extracted);
 
-        // original loop body becomes the dispatch call
-        InsnList rep = new InsnList();
-        rep.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        rep.add(new VarInsnNode(Opcodes.ALOAD, chunkLocal));
-        rep.add(new VarInsnNode(Opcodes.ILOAD, 1));
-        rep.add(new VarInsnNode(Opcodes.ILOAD, 2));
-        rep.add(new VarInsnNode(Opcodes.ILOAD, 3));
-        rep.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "callEnvTick",
+        // guard: if (parallelEnv) { callEnvTick(...); continue; } else fall through to original body
+        LabelNode originalBody = new LabelNode();
+        InsnList guard = new InsnList();
+        guard.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "shouldDispatchEnv", "()Z", false));
+        guard.add(new JumpInsnNode(Opcodes.IFEQ, originalBody));
+        guard.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        guard.add(new VarInsnNode(Opcodes.ALOAD, chunkLocal));
+        guard.add(new VarInsnNode(Opcodes.ILOAD, 1));
+        guard.add(new VarInsnNode(Opcodes.ILOAD, 2));
+        guard.add(new VarInsnNode(Opcodes.ILOAD, 3));
+        guard.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "callEnvTick",
                 "(Lnet/minecraft/world/WorldServer;Lnet/minecraft/world/chunk/Chunk;IZZ)V", false));
-        ins.insertBefore(backEdge, rep);
+        guard.add(new JumpInsnNode(Opcodes.GOTO, ((JumpInsnNode) backEdge).label));
+        guard.add(originalBody);
+        ins.insertBefore(store.getNext(), guard);
 
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
         {

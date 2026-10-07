@@ -383,6 +383,11 @@ public class ASMHookTerminator
         }
     }
 
+    public static boolean shouldDispatchEnv()
+    {
+        return !GeneralConfig.disabled && GeneralConfig.parallelEnv;
+    }
+
     public static boolean shouldThreadChunks()
     {
         return GeneralConfig.threadChunks;
