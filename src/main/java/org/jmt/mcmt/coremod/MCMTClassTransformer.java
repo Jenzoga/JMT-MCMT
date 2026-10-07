@@ -371,6 +371,25 @@ public class MCMTClassTransformer implements IClassTransformer
         synchronizeOnTickList(cn, new String[] { "getPendingBlockUpdates", "func_175712_a" },
                 "(Lnet/minecraft/world/gen/structure/StructureBoundingBox;Z)Ljava/util/List;");
 
+        // WorldServer overrides World's entity-list entry points, so the World
+        // wrappers alone do not cover virtual dispatch on a WorldServer `this`.
+        // Wrapping updateEntities itself also keeps foamfix's WorldServerRemovalPatch
+        // from injecting its iterator into the method (its SIPUSH 300/IFNULL
+        // injection anchor is absent from the wrapper body) - that injected
+        // iterator was the CME crash site in the 219-mod pack.
+        String[] entityField = { "loadedEntityList", "field_72996_f" };
+        synchronizeOnField(cn, new String[] { "updateEntities", "func_72939_s" }, "()V",
+                "net/minecraft/world/World", entityField, "Ljava/util/List;", "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
+                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "onEntityRemoved", "func_72847_b" },
+                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "onEntityAdded", "func_72923_a" },
+                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
+                "loadedEntityList");
+
         cn.accept(cw);
         LOG.info("Patched WorldServer: env tick per-chunk dispatch + mcmt$tickEnvChunk extraction + scheduled-tick sync");
         return cw.toByteArray();
@@ -423,6 +442,27 @@ public class MCMTClassTransformer implements IClassTransformer
         }
         if (fieldName == null)
         {
+            // inherited field (declared on a superclass we do not see here):
+            // pick the candidate matching this class's naming mode (func_/field_
+            // prefixes appear together with SRG names, plain names with MCP)
+            boolean srg = false;
+            for (MethodNode mn : cn.methods)
+            {
+                if (mn.name.startsWith("func_"))
+                {
+                    srg = true;
+                    break;
+                }
+            }
+            for (String f : fieldNames)
+                if (f.startsWith("field_") == srg)
+                {
+                    fieldName = f;
+                    break;
+                }
+        }
+        if (fieldName == null)
+        {
             LOG.error(logName + " field not found in " + cn.name);
             return;
         }
@@ -453,7 +493,10 @@ public class MCMTClassTransformer implements IClassTransformer
             v++;
             b.add(new VarInsnNode(t.getOpcode(Opcodes.ILOAD), v));
         }
-        b.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, cn.name, origName, desc, false));
+        // INVOKESPECIAL: bind the renamed original exactly to this class.
+        // INVOKEVIRTUAL would let a subclass's renamed original (reached via
+        // a super() call chain) dispatch back into this wrapper forever.
+        b.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, cn.name, origName, desc, false));
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
         b.add(new LdcInsnNode(wrapperName + " exit"));
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
