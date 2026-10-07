@@ -1,0 +1,14 @@
+[
+  {
+    "modid": "jmt_mcmt",
+    "name": "MCMT",
+    "description": "Modern Community Multithreading - server-side parallelism for Minecraft 1.12.2",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "url": "",
+    "updateUrl": "",
+    "authorList": ["jmtmakesthings"],
+    "credits": "jty233 and the MCMT community",
+    "dependencies": []
+  }
+]

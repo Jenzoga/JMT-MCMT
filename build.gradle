@@ -32,6 +32,8 @@ minecraft {
 runServer {
     workingDir project.file('run')
     systemProperty 'fml.coreMods.load', 'org.jmt.mcmt.coremod.MCMTLoadingPlugin'
+    // Dev jars are unsigned; FMLSanityChecker would otherwise refuse to boot.
+    systemProperty 'fml.ignoreInvalidMinecraftCertificates', 'true'
 }
 
 jar {
