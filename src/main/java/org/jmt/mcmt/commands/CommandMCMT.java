@@ -34,6 +34,20 @@ public class CommandMCMT extends CommandBase
         if (args.length > 0 && args[0].equals("stats"))
         {
             sender.sendMessage(new TextComponentString("MCMT pool size: " + ASMHookTerminator.poolSize()));
+            sender.sendMessage(new TextComponentString("In-flight: worlds=" + ASMHookTerminator.currentWorlds.get()
+                    + " ents=" + ASMHookTerminator.currentEnts.get()
+                    + " tes=" + ASMHookTerminator.currentTEs.get()
+                    + " envs=" + ASMHookTerminator.currentEnvs.get()));
+            long avg = 0;
+            int fill = ASMHookTerminator.lastTickTimeFill;
+            if (fill > 0)
+            {
+                long sum = 0;
+                for (int i = 0; i < fill; i++)
+                    sum += ASMHookTerminator.lastTickTime[i];
+                avg = sum / fill / 1000000L;
+            }
+            sender.sendMessage(new TextComponentString("Avg tick (last " + fill + "): " + avg + " ms"));
         }
         else
         {

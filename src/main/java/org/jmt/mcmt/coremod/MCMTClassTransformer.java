@@ -53,6 +53,17 @@ public class MCMTClassTransformer implements IClassTransformer
                 LOG.error("MCMT failed to patch World, running without entity parallelism", e);
             }
         }
+        if (transformedName.equals("net.minecraft.server.dedicated.DedicatedServer"))
+        {
+            try
+            {
+                return patchDedicatedServer(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch DedicatedServer, running without crash-report integration", e);
+            }
+        }
         if (transformedName.equals("net.minecraft.world.WorldServer"))
         {
             try
@@ -65,6 +76,41 @@ public class MCMTClassTransformer implements IClassTransformer
             }
         }
         return basicClass;
+    }
+
+    private byte[] patchDedicatedServer(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        MethodNode m = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.desc.equals("(Lnet/minecraft/crash/CrashReport;)Lnet/minecraft/crash/CrashReport;")
+                    && (mn.name.equals("addServerInfoToCrashReport") || mn.name.equals("func_71230_b")))
+            {
+                m = mn;
+                break;
+            }
+        }
+        if (m == null)
+        {
+            LOG.error("addServerInfoToCrashReport not found in DedicatedServer");
+            return in;
+        }
+        InsnList pre = new InsnList();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        pre.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/crash/CrashReport", "getCategory",
+                "()Lnet/minecraft/crash/CrashReportCategory;", false));
+        pre.add(new org.objectweb.asm.tree.LdcInsnNode("MCMT"));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "populateCrashReport",
+                "()Ljava/lang/String;", false));
+        pre.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/crash/CrashReportCategory", "addCrashSection",
+                "(Ljava/lang/String;Ljava/lang/Object;)V", false));
+        m.instructions.insert(pre);
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cn.accept(cw);
+        LOG.info("Patched DedicatedServer: crash-report integration");
+        return cw.toByteArray();
     }
 
     private byte[] patchWorldServer(byte[] in)

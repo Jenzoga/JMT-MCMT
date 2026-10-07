@@ -107,6 +107,10 @@ public class ASMHookTerminator
         if (p != null)
         {
             p.arriveAndAwaitAdvance();
+            lastTickTime[lastTickTimePos] = System.nanoTime() - tickStart;
+            lastTickTimePos = (lastTickTimePos + 1) % lastTickTime.length;
+            lastTickTimeFill = Math.min(lastTickTimeFill + 1, lastTickTime.length);
+            tickStart = System.nanoTime();
         }
         else
         {
@@ -310,21 +314,6 @@ public class ASMHookTerminator
     public static long[] lastTickTime = new long[32];
     public static int lastTickTimePos = 0;
     public static int lastTickTimeFill = 0;
-
-    public static void postTick(MinecraftServer server)
-    {
-        if (mcs != server)
-        {
-            LOGGER.warn("Multiple servers?");
-            return;
-        }
-        p.arriveAndAwaitAdvance();
-        isTicking.set(false);
-        p = null;
-        lastTickTime[lastTickTimePos] = System.nanoTime() - tickStart;
-        lastTickTimePos = (lastTickTimePos + 1) % lastTickTime.length;
-        lastTickTimeFill = Math.min(lastTickTimeFill + 1, lastTickTime.length - 1);
-    }
 
     public static String populateCrashReport()
     {
