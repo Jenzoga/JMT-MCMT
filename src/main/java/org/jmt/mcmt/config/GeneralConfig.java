@@ -10,7 +10,7 @@ public class GeneralConfig
 {
     public static int threads = 4;
     public static boolean parallelWorld = true;
-    public static boolean parallelEntities = true;
+    public static boolean parallelEntities = false;
     public static boolean parallelTE = true;
     public static boolean parallelEnv = false;
     public static boolean threadChunks = false;
@@ -26,7 +26,7 @@ public class GeneralConfig
         cfg.load();
         threads = cfg.getInt("threads", "general", 4, 1, 1024, "Parallelism pool size");
         parallelWorld = cfg.getBoolean("parallelWorld", "general", true, "Tick worlds in parallel");
-        parallelEntities = cfg.getBoolean("parallelEntities", "general", true, "Tick entities in parallel");
+        parallelEntities = cfg.getBoolean("parallelEntities", "general", false, "Tick entities in parallel. Unsafe with mods that iterate loadedEntityList on the main thread (e.g. foamfix_removeUnloadedEntities): pool-thread entity add/remove races that iteration (ConcurrentModificationException). Needs an entity-list snapshot/redesign first.");
         parallelTE = cfg.getBoolean("parallelTE", "general", true, "Tick tile entities in parallel");
         parallelEnv = cfg.getBoolean("parallelEnv", "general", false, "Tick environment processing per chunk in parallel. Unsafe on fresh worlds: pool-thread block updates race WorldServer's scheduledEventsForTickList (TickNextTick list out of synch). Needs serdes first.");
         threadChunks = cfg.getBoolean("threadChunks", "general", false, "Allow chunk access from pool threads");

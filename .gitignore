@@ -82,3 +82,6 @@ src/main/resources/META-INF/mods.toml
 logs/*
 
 mods/
+*.log
+/*.log
+
