@@ -238,6 +238,75 @@ public class ASMHookTerminator
         });
     }
 
+    public static void profSection(net.minecraft.profiler.Profiler profiler, String name)
+    {
+    }
+
+    public static void profEnd(net.minecraft.profiler.Profiler profiler)
+    {
+    }
+
+    private static volatile java.lang.invoke.MethodHandle envTickHandle;
+
+    private static void invokeEnvTick(WorldServer world, net.minecraft.world.chunk.Chunk chunk, int randomTickSpeed, boolean raining, boolean thundering)
+    {
+        try
+        {
+            java.lang.invoke.MethodHandle mh = envTickHandle;
+            if (mh == null)
+            {
+                mh = java.lang.invoke.MethodHandles.lookup().findVirtual(WorldServer.class, "mcmt$tickEnvChunk",
+                        java.lang.invoke.MethodType.methodType(void.class, net.minecraft.world.chunk.Chunk.class, int.class, boolean.class, boolean.class));
+                envTickHandle = mh;
+            }
+            mh.invokeExact(world, chunk, randomTickSpeed, raining, thundering);
+        }
+        catch (Throwable t)
+        {
+            throw new RuntimeException("Environment chunk tick failed", t);
+        }
+    }
+
+    public static void callEnvTick(WorldServer world, net.minecraft.world.chunk.Chunk chunk, int randomTickSpeed, boolean raining, boolean thundering)
+    {
+        if (GeneralConfig.disabled || !GeneralConfig.parallelEnv)
+        {
+            invokeEnvTick(world, chunk, randomTickSpeed, raining, thundering);
+            return;
+        }
+        String taskName = null;
+        if (GeneralConfig.opsTracing)
+        {
+            taskName = "EnvTick: " + chunk.x + "," + chunk.z;
+            currentTasks.add(taskName);
+        }
+        String finalTaskName = taskName;
+        p.register();
+        ex.execute(() ->
+        {
+            long[] locks = null;
+            try
+            {
+                currentEnvs.incrementAndGet();
+                locks = org.jmt.mcmt.paralelised.ChunkLock.INSTANCE.lock(chunk.x, chunk.z, 1);
+                invokeEnvTick(world, chunk, randomTickSpeed, raining, thundering);
+            }
+            catch (Exception e)
+            {
+                LOGGER.error("Exception ticking environment at chunk " + chunk.x + "," + chunk.z, e);
+            }
+            finally
+            {
+                if (locks != null)
+                    org.jmt.mcmt.paralelised.ChunkLock.INSTANCE.unlock(locks);
+                currentEnvs.decrementAndGet();
+                p.arriveAndDeregister();
+                if (GeneralConfig.opsTracing)
+                    currentTasks.remove(finalTaskName);
+            }
+        });
+    }
+
     public static long[] lastTickTime = new long[32];
     public static int lastTickTimePos = 0;
     public static int lastTickTimeFill = 0;
