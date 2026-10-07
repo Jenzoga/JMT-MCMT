@@ -202,9 +202,41 @@ public class ASMHookTerminator
         return isLocking;
     }
 
-    // NOTE: 1.12 has no central TileEntity tick loop (no World.tickBlockEntities
-    // equivalent; TEs dispatch per-block via scheduled ticks). A TE parallel
-    // hook needs a different injection strategy and is deferred.
+    public static void callTileEntityTick(TileEntity te, World world)
+    {
+        if (GeneralConfig.disabled || !GeneralConfig.parallelTE || !(world instanceof WorldServer))
+        {
+            ((net.minecraft.util.ITickable) te).update();
+            return;
+        }
+        String taskName = null;
+        if (GeneralConfig.opsTracing)
+        {
+            taskName = "TETick: " + te.toString() + "@" + te.hashCode();
+            currentTasks.add(taskName);
+        }
+        String finalTaskName = taskName;
+        p.register();
+        ex.execute(() ->
+        {
+            try
+            {
+                currentTEs.incrementAndGet();
+                ((net.minecraft.util.ITickable) te).update();
+            }
+            catch (Exception e)
+            {
+                LOGGER.error("Exception ticking TE at " + te.getPos(), e);
+            }
+            finally
+            {
+                currentTEs.decrementAndGet();
+                p.arriveAndDeregister();
+                if (GeneralConfig.opsTracing)
+                    currentTasks.remove(finalTaskName);
+            }
+        });
+    }
 
     public static long[] lastTickTime = new long[32];
     public static int lastTickTimePos = 0;

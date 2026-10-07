@@ -10,6 +10,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 import net.minecraft.launchwrapper.IClassTransformer;
@@ -91,9 +92,42 @@ public class MCMTClassTransformer implements IClassTransformer
             }
         }
         if (n == 0)
-            LOG.error("Entity.onUpdate call site not found in updateEntityWithOptionalForce");
+            LOG.error("Entity.onUpdate call site not found in updateEntities");
         else
             LOG.info("Patched World: " + n + " entity tick dispatch site(s)");
+
+        // TE loop: ((ITickable)te).update() -> callTileEntityTick(te, world)
+        int t = 0;
+        for (AbstractInsnNode ain = ins.getFirst(); ain != null; )
+        {
+            AbstractInsnNode next = ain.getNext();
+            if (ain instanceof MethodInsnNode)
+            {
+                MethodInsnNode mi = (MethodInsnNode) ain;
+                if (mi.getOpcode() == Opcodes.INVOKEINTERFACE
+                        && mi.owner.equals("net/minecraft/util/ITickable")
+                        && mi.name.equals("update") && mi.desc.equals("()V"))
+                {
+                    AbstractInsnNode prev = mi.getPrevious();
+                    if (prev instanceof TypeInsnNode && ((TypeInsnNode) prev).desc.equals("net/minecraft/util/ITickable"))
+                    {
+                        ins.remove(prev);
+                        InsnList rep = new InsnList();
+                        rep.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                        rep.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "callTileEntityTick",
+                                "(Lnet/minecraft/tileentity/TileEntity;Lnet/minecraft/world/World;)V", false));
+                        ins.insertBefore(mi, rep);
+                        ins.remove(mi);
+                        t++;
+                    }
+                }
+            }
+            ain = next;
+        }
+        if (t == 0)
+            LOG.error("ITickable.update call site not found in updateEntities");
+        else
+            LOG.info("Patched World: " + t + " TE tick dispatch site(s)");
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cn.accept(cw);
         return cw.toByteArray();
