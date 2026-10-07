@@ -17,6 +17,8 @@ import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -240,7 +242,34 @@ public class MCMTClassTransformer implements IClassTransformer
 
         MethodNode extracted = new MethodNode(Opcodes.ASM5, Opcodes.ACC_PUBLIC | Opcodes.ACC_SYNTHETIC,
                 "mcmt$tickEnvChunk", "(Lnet/minecraft/world/chunk/Chunk;IZZ)V", null, null);
+        // canonical clone pattern: fresh LabelNodes for labels inside the body,
+        // identity map for labels outside it (loop back edges), otherwise
+        // clone() dereferences a null map lookup for not-yet-visited labels
         java.util.Map<LabelNode, LabelNode> labelMap = new java.util.IdentityHashMap<>();
+        for (AbstractInsnNode node : body)
+            if (node instanceof LabelNode)
+                labelMap.put((LabelNode) node, new LabelNode());
+        for (AbstractInsnNode node : body)
+        {
+            java.util.List<LabelNode> targets = new java.util.ArrayList<>();
+            if (node instanceof JumpInsnNode)
+                targets.add(((JumpInsnNode) node).label);
+            else if (node instanceof LookupSwitchInsnNode)
+            {
+                LookupSwitchInsnNode ls = (LookupSwitchInsnNode) node;
+                targets.add(ls.dflt);
+                targets.addAll(ls.labels);
+            }
+            else if (node instanceof TableSwitchInsnNode)
+            {
+                TableSwitchInsnNode ts = (TableSwitchInsnNode) node;
+                targets.add(ts.dflt);
+                targets.addAll(ts.labels);
+            }
+            for (LabelNode l : targets)
+                if (!labelMap.containsKey(l))
+                    labelMap.put(l, l);
+        }
         for (AbstractInsnNode node : body)
         {
             if (node instanceof FrameNode)
