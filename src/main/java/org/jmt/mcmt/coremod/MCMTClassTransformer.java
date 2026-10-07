@@ -15,7 +15,10 @@ import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
@@ -120,7 +123,7 @@ public class MCMTClassTransformer implements IClassTransformer
         MethodNode m = null;
         for (MethodNode mn : cn.methods)
         {
-            if (mn.desc.equals("()V") && (mn.name.equals("updateBlocks") || mn.name.equals("func_73084_a")))
+            if (mn.desc.equals("()V") && (mn.name.equals("updateBlocks") || mn.name.equals("func_147456_g")))
             {
                 m = mn;
                 break;
@@ -265,7 +268,8 @@ public class MCMTClassTransformer implements IClassTransformer
             MethodInsnNode mi = (MethodInsnNode) ain;
             if (!mi.owner.equals("net/minecraft/profiler/Profiler"))
                 continue;
-            boolean section = mi.name.equals("startSection") || mi.name.equals("endStartSection");
+            boolean section = mi.name.equals("startSection") || mi.name.equals("endStartSection")
+                    || mi.name.equals("func_76320_a") || mi.name.equals("func_76318_c");
             MethodInsnNode nn = new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK,
                     section ? "profSection" : "profEnd",
                     section ? "(Lnet/minecraft/profiler/Profiler;Ljava/lang/String;)V"
@@ -315,9 +319,108 @@ public class MCMTClassTransformer implements IClassTransformer
                 }
             }
         };
+        // Pool-thread entity/TE ticks can schedule block updates while this
+        // world's tick drains the scheduled-tick lists; serialize both sides
+        // on the TreeSet monitor so the size invariant holds.
+        synchronizeOnTickList(cn, new String[] { "scheduleBlockUpdate", "func_180497_b" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V");
+        synchronizeOnTickList(cn, new String[] { "updateBlockTick", "func_175654_a" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V");
+        synchronizeOnTickList(cn, new String[] { "isBlockTickPending", "func_175691_a" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z");
+        synchronizeOnTickList(cn, new String[] { "isUpdateScheduled", "func_184145_b" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z");
+        synchronizeOnTickList(cn, new String[] { "tickUpdates", "func_72955_a" }, "(Z)Z");
+        synchronizeOnTickList(cn, new String[] { "getPendingBlockUpdates", "func_175712_a" },
+                "(Lnet/minecraft/world/gen/structure/StructureBoundingBox;Z)Ljava/util/List;");
+
         cn.accept(cw);
-        LOG.info("Patched WorldServer: env tick per-chunk dispatch + mcmt$tickEnvChunk extraction");
+        LOG.info("Patched WorldServer: env tick per-chunk dispatch + mcmt$tickEnvChunk extraction + scheduled-tick sync");
         return cw.toByteArray();
+    }
+
+    private void synchronizeOnTickList(ClassNode cn, String[] names, String desc)
+    {
+        MethodNode m = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (!mn.desc.equals(desc))
+                continue;
+            for (String n : names)
+            {
+                if (mn.name.equals(n))
+                {
+                    m = mn;
+                    break;
+                }
+            }
+            if (m != null)
+                break;
+        }
+        if (m == null)
+        {
+            LOG.error("sync target not found in WorldServer: " + names[0]);
+            return;
+        }
+        String fieldName = null;
+        for (FieldNode fn : cn.fields)
+        {
+            if (fn.name.equals("pendingTickListEntriesTreeSet") || fn.name.equals("field_73065_O"))
+            {
+                fieldName = fn.name;
+                break;
+            }
+        }
+        if (fieldName == null)
+        {
+            LOG.error("pendingTickListEntriesTreeSet field not found in WorldServer");
+            return;
+        }
+        // Rename the original and emit a wrapper that runs it inside
+        // synchronized(this.pendingTickListEntriesTreeSet). The wrapper uses
+        // no new locals so the frame layout of the exception handler stays
+        // trivially correct under COMPUTE_FRAMES.
+        String wrapperName = m.name;
+        String origName = m.name + "$mcmt$safe";
+        m.name = origName;
+
+        MethodNode w = new MethodNode(Opcodes.ASM5, m.access, wrapperName, desc, null, null);
+        InsnList b = w.instructions;
+        LabelNode start = new LabelNode();
+        LabelNode handler = new LabelNode();
+        b.add(start);
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new InsnNode(Opcodes.MONITORENTER));
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        b.add(new LdcInsnNode(wrapperName + " enter"));
+        b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
+                "(Ljava/lang/Object;Ljava/lang/String;)V", false));
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        int v = 0;
+        for (Type t : Type.getArgumentTypes(desc))
+        {
+            v++;
+            b.add(new VarInsnNode(t.getOpcode(Opcodes.ILOAD), v));
+        }
+        b.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/world/WorldServer",
+                origName, desc, false));
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        b.add(new LdcInsnNode(wrapperName + " exit"));
+        b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
+                "(Ljava/lang/Object;Ljava/lang/String;)V", false));
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new InsnNode(Opcodes.MONITOREXIT));
+        b.add(new InsnNode(Type.getReturnType(desc).getOpcode(Opcodes.IRETURN)));
+        b.add(handler);
+        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        b.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/world/WorldServer", fieldName, "Ljava/util/TreeSet;"));
+        b.add(new InsnNode(Opcodes.MONITOREXIT));
+        b.add(new InsnNode(Opcodes.ATHROW));
+        w.tryCatchBlocks.add(new TryCatchBlockNode(start, handler, handler, null));
+        cn.methods.add(w);
+        LOG.info("Synchronized " + w.name + " on pendingTickListEntriesTreeSet");
     }
 
     private byte[] patchWorld(byte[] in)
@@ -376,7 +479,8 @@ public class MCMTClassTransformer implements IClassTransformer
                 MethodInsnNode mi = (MethodInsnNode) ain;
                 if (mi.getOpcode() == Opcodes.INVOKEINTERFACE
                         && mi.owner.equals("net/minecraft/util/ITickable")
-                        && mi.name.equals("update") && mi.desc.equals("()V"))
+                        && (mi.name.equals("update") || mi.name.equals("func_73660_a"))
+                        && mi.desc.equals("()V"))
                 {
                     AbstractInsnNode prev = mi.getPrevious();
                     if (prev instanceof TypeInsnNode && ((TypeInsnNode) prev).desc.equals("net/minecraft/util/ITickable"))
@@ -437,7 +541,7 @@ public class MCMTClassTransformer implements IClassTransformer
             MethodInsnNode mi = (MethodInsnNode) ain;
             if (mi.getOpcode() == Opcodes.INVOKEVIRTUAL
                     && mi.owner.equals("net/minecraft/world/WorldServer")
-                    && (mi.name.equals("tick") || mi.name.equals("func_73028_a"))
+                    && (mi.name.equals("tick") || mi.name.equals("func_72835_b"))
                     && mi.desc.equals("()V"))
             {
                 // stack currently holds the WorldServer receiver; add the

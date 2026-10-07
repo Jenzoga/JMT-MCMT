@@ -9,6 +9,7 @@ import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Constructor;
 
 import org.apache.logging.log4j.LogManager;
@@ -340,6 +341,46 @@ public class ASMHookTerminator
             confInfo.append("\t\t"); confInfo.append("-- Running Operations End -- "); confInfo.append("\n");
         }
         return confInfo.toString();
+    }
+
+    private static final AtomicLong lastSizeWarn = new AtomicLong();
+
+    public static void debugTickSize(Object ws, String op)
+    {
+        if (!Boolean.getBoolean("mcmt.debug"))
+            return;
+        try
+        {
+            java.util.Collection<?> tree = null;
+            java.util.Collection<?> hash = null;
+            for (java.lang.reflect.Field f : ws.getClass().getDeclaredFields())
+            {
+                if (f.getName().equals("pendingTickListEntriesTreeSet") || f.getName().equals("field_73065_O"))
+                {
+                    f.setAccessible(true);
+                    tree = (java.util.Collection<?>) f.get(ws);
+                }
+                else if (f.getName().equals("pendingTickListEntriesHashSet") || f.getName().equals("field_73064_N"))
+                {
+                    f.setAccessible(true);
+                    hash = (java.util.Collection<?>) f.get(ws);
+                }
+            }
+            if (tree != null && hash != null && tree.size() != hash.size())
+            {
+                long now = System.currentTimeMillis();
+                if (now - lastSizeWarn.get() > 3000)
+                {
+                    lastSizeWarn.set(now);
+                    LOGGER.warn("TickList mismatch at {} (world {}): tree={} hash={} thread={}",
+                            op, System.identityHashCode(ws), tree.size(), hash.size(),
+                            Thread.currentThread().getName());
+                }
+            }
+        }
+        catch (Throwable ignored)
+        {
+        }
     }
 
     public static boolean shouldThreadChunks()

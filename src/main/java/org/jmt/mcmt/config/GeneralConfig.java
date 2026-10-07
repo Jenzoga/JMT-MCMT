@@ -12,7 +12,7 @@ public class GeneralConfig
     public static boolean parallelWorld = true;
     public static boolean parallelEntities = true;
     public static boolean parallelTE = true;
-    public static boolean parallelEnv = true;
+    public static boolean parallelEnv = false;
     public static boolean threadChunks = false;
     public static volatile boolean disabled = false;
     public static boolean opsTracing = false;
@@ -28,7 +28,7 @@ public class GeneralConfig
         parallelWorld = cfg.getBoolean("parallelWorld", "general", true, "Tick worlds in parallel");
         parallelEntities = cfg.getBoolean("parallelEntities", "general", true, "Tick entities in parallel");
         parallelTE = cfg.getBoolean("parallelTE", "general", true, "Tick tile entities in parallel");
-        parallelEnv = cfg.getBoolean("parallelEnv", "general", true, "Tick environment processing per chunk in parallel");
+        parallelEnv = cfg.getBoolean("parallelEnv", "general", false, "Tick environment processing per chunk in parallel. Unsafe on fresh worlds: pool-thread block updates race WorldServer's scheduledEventsForTickList (TickNextTick list out of synch). Needs serdes first.");
         threadChunks = cfg.getBoolean("threadChunks", "general", false, "Allow chunk access from pool threads");
         if (cfg.hasChanged())
             cfg.save();
