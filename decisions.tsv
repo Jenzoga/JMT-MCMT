@@ -1,0 +1,7 @@
+timestamp	unit	decision	rationale	evidence	result
+2026-10-07	framing	Port 1.16.5 -> 1.12.2 server-side-only, Java coremod replaces JS coremods	Forge 1.12.2 has no coremods.json/ASMAPI; upstream JS transformers cannot run	branch 1221 survey report	VERIFIED
+2026-10-07	unit1	JDK = Azul Zulu 8.0.504 aarch64 tarball in ~/.local/jdk	No JVM installed; FG 2.3 requires JDK 8; tarball avoids admin rights	~/.local/jdk/zulu8.96.0.205.../Contents/Home/bin/java -version = 1.8.0_504	VERIFIED
+2026-10-07	unit1	build.gradle rewritten for ForgeGradle 2.3-SNAPSHOT	FG3 is 1.13+; 1.12.2 toolchain is FG2.3 + stable_39 mappings	maven.minecraftforge.net hosts FG 2.3-SNAPSHOT jar	VERIFIED
+2026-10-07	unit1	Plugin id net.minecraftforge.gradle.forge (not net.minecraftforge.gradle)	FG 2.x registers the forge plugin under its own id	jar META-INF/gradle-plugins/net.minecraftforge.gradle.forge.properties	VERIFIED
+2026-10-07	unit1	runServer configured as JavaExec task, not minecraft.runs	FG 2.3 ForgeExtension has no runs(); UserBasePlugin creates runServer/runClient as JavaExec	gradle error "Could not find method runs()" then green config	VERIFIED
+2026-10-07	unit1	userdev jar synthesized from universal+installer; upstream purged it	from 2023 purge left only universal+repacked-installer; binpatches+AT+version.json all survive inside those	etc/buildscripts/gen-userdev.sh; setupCiWorkspace BUILD SUCCESSFUL; forgeBin jar has 3344 MC + 1510 Forge classes	VERIFIED
