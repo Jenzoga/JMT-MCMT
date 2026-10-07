@@ -20,6 +20,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.tileentity.TileEntityPiston;
+import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 
 /**
@@ -156,7 +157,7 @@ public class ASMHookTerminator
         });
     }
 
-    public static void callEntityTick(Entity entityIn, WorldServer world)
+    public static void callEntityTick(Entity entityIn, World world)
     {
         if (GeneralConfig.disabled || !GeneralConfig.parallelEntities)
         {

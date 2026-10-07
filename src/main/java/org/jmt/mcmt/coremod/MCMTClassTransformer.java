@@ -35,7 +35,68 @@ public class MCMTClassTransformer implements IClassTransformer
                 LOG.error("MCMT failed to patch MinecraftServer, running without world parallelism", e);
             }
         }
+        if (transformedName.equals("net.minecraft.world.World"))
+        {
+            try
+            {
+                return patchWorld(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch World, running without entity parallelism", e);
+            }
+        }
         return basicClass;
+    }
+
+    private byte[] patchWorld(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        MethodNode m = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.desc.equals("()V")
+                    && (mn.name.equals("updateEntities") || mn.name.equals("func_72939_s")))
+            {
+                m = mn;
+                break;
+            }
+        }
+        if (m == null)
+        {
+            LOG.error("updateEntities not found in World");
+            return in;
+        }
+        InsnList ins = m.instructions;
+        int n = 0;
+        for (AbstractInsnNode ain = ins.getFirst(); ain != null; ain = ain.getNext())
+        {
+            if (!(ain instanceof MethodInsnNode))
+                continue;
+            MethodInsnNode mi = (MethodInsnNode) ain;
+            if (mi.getOpcode() == Opcodes.INVOKEVIRTUAL
+                    && mi.owner.equals("net/minecraft/entity/Entity")
+                    && (mi.name.equals("onUpdate") || mi.name.equals("func_70071_h_"))
+                    && mi.desc.equals("()V"))
+            {
+                // stack holds the entity; append this-world and dispatch
+                InsnList rep = new InsnList();
+                rep.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                rep.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "callEntityTick",
+                        "(Lnet/minecraft/entity/Entity;Lnet/minecraft/world/World;)V", false));
+                ins.insertBefore(mi, rep);
+                ins.remove(mi);
+                n++;
+            }
+        }
+        if (n == 0)
+            LOG.error("Entity.onUpdate call site not found in updateEntityWithOptionalForce");
+        else
+            LOG.info("Patched World: " + n + " entity tick dispatch site(s)");
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cn.accept(cw);
+        return cw.toByteArray();
     }
 
     private byte[] patchMinecraftServer(byte[] in)
