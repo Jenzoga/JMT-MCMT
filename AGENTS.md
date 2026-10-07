@@ -82,6 +82,8 @@ When the user requests a durable behavior change, record it here or in the relev
 
 MCMT (server multithreading mod) port from Minecraft 1.16.5 to 1.12.2 / Forge 14.23.5.2860, branch `1221`. Toolchain: JDK 8 (`~/.local/jdk/zulu8*`), ForgeGradle 2.3 fork (`com.anatawa12.forge:ForgeGradle:2.3-1.0.+`), mappings `stable_39`. Upstream userdev purged; synthesized locally — see `etc/buildscripts/AGENTS.md`. Decisions trail: `decisions.tsv`.
 
+Port status (2026-10-07): toolchain, binpatches, coremod harness, and all four parallel hooks (world / entity / TE / env-chunk via `mcmt$tickEnvChunk` extraction + ChunkLock) plus stats command and crash-report integration are landed and soak-verified. Not ported: serdes subsystem, JMX, syncfu, fastutil concurrent maps — deferred until cross-thread safety issues appear in practice.
+
 ## Child DOX Index
 
 - `etc/buildscripts/AGENTS.md` — dev toolchain synthesis: userdev jar, merged binpatches, new-class injection.
