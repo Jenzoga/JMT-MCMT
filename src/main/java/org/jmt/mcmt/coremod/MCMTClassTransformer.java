@@ -2,22 +2,96 @@ package org.jmt.mcmt.coremod;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import net.minecraft.launchwrapper.IClassTransformer;
 
 public class MCMTClassTransformer implements IClassTransformer
 {
     private static final Logger LOG = LogManager.getLogger("MCMT-Core");
-    private static boolean logged = false;
+    private static final String HOOK = "org/jmt/mcmt/asmdest/ASMHookTerminator";
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass)
     {
-        if (!logged)
+        if (transformedName.equals("net.minecraft.server.MinecraftServer"))
         {
-            logged = true;
-            LOG.info("MCMT coremod transformer active");
+            try
+            {
+                byte[] out = patchMinecraftServer(basicClass);
+                LOG.info("MCMT coremod transformer active");
+                return out;
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch MinecraftServer, running without world parallelism", e);
+            }
         }
         return basicClass;
+    }
+
+    private byte[] patchMinecraftServer(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        MethodNode m = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.desc.equals("()V")
+                    && (mn.name.equals("updateTimeLightAndEntities") || mn.name.equals("func_71190_q")))
+            {
+                m = mn;
+                break;
+            }
+        }
+        if (m == null)
+        {
+            LOG.error("updateTimeLightAndEntities not found in MinecraftServer");
+            return in;
+        }
+        InsnList ins = m.instructions;
+        InsnList pre = new InsnList();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "preTick",
+                "(Lnet/minecraft/server/MinecraftServer;)V", false));
+        ins.insert(pre);
+
+        int n = 0;
+        for (AbstractInsnNode ain = ins.getFirst(); ain != null; ain = ain.getNext())
+        {
+            if (!(ain instanceof MethodInsnNode))
+                continue;
+            MethodInsnNode mi = (MethodInsnNode) ain;
+            if (mi.getOpcode() == Opcodes.INVOKEVIRTUAL
+                    && mi.owner.equals("net/minecraft/world/WorldServer")
+                    && (mi.name.equals("tick") || mi.name.equals("func_73028_a"))
+                    && mi.desc.equals("()V"))
+            {
+                // stack currently holds the WorldServer receiver; add the
+                // MinecraftServer and hand both to the hook terminator
+                InsnList rep = new InsnList();
+                rep.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                rep.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "callTick",
+                        "(Lnet/minecraft/world/WorldServer;Lnet/minecraft/server/MinecraftServer;)V", false));
+                ins.insertBefore(mi, rep);
+                ins.remove(mi);
+                n++;
+            }
+        }
+        if (n == 0)
+            LOG.error("WorldServer.tick call site not found in updateTimeLightAndEntities");
+        else
+            LOG.info("Patched MinecraftServer: preTick + " + n + " world tick dispatch site(s)");
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cn.accept(cw);
+        return cw.toByteArray();
     }
 }

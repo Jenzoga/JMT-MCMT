@@ -1,6 +1,8 @@
 package org.jmt.mcmt.config;
 
 import java.io.File;
+import java.util.HashSet;
+import java.util.Set;
 
 import net.minecraftforge.common.config.Configuration;
 
@@ -12,6 +14,11 @@ public class GeneralConfig
     public static boolean parallelTE = true;
     public static boolean parallelEnv = true;
     public static boolean threadChunks = false;
+    public static volatile boolean disabled = false;
+    public static boolean opsTracing = false;
+    public static boolean chunkLockModded = true;
+    public static Set<Class<?>> teWhiteList = new HashSet<Class<?>>();
+    public static Set<Class<?>> teBlackList = new HashSet<Class<?>>();
 
     public static void load(File file)
     {
