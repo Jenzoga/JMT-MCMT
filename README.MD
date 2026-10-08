@@ -1,91 +1,89 @@
-[![Join our discord](https://img.shields.io/discord/749993549004800081?style=for-the-badge)](https://discord.gg/ZuYgPFURkf)
-[![Issues](https://img.shields.io/github/issues/jediminer543/JMT-MCMT?style=for-the-badge)](https://github.com/jediminer543/JMT-MCMT/issues)
-[![Build Statis](https://img.shields.io/github/workflow/status/jediminer543/JMT-MCMT/Java%20CI%20with%20Gradle?style=for-the-badge)](https://github.com/jediminer543/JMT-MCMT/actions/workflows/build-dev.yml)
-[![Curseforge Downloads](https://img.shields.io/badge/dynamic/json?label=Curse%20Downloads&query=downloads.total&url=https%3A%2F%2Fapi.cfwidget.com%2Fminecraft%2Fmc-mods%2Fmcmt-multithreading&style=for-the-badge)](https://www.curseforge.com/minecraft/mc-mods/mcmt-multithreading)
-[![Support Me](https://forthebadge.com/images/badges/built-with-love.svg)](https://ko-fi.com/jediminer543)
-[![Shenanagins](https://forthebadge.com/images/badges/powered-by-black-magic.svg)](https://www.youtube.com/watch?v=djV11Xbc914)
+# MCMT — Minecraft Multi-Threading Mod (1.12.2 port)
 
-# MCMT - Minecraft Multi-Threading Mod
+A Forge mod that parallelises the Minecraft server tick loop — worlds, entities, tile entities, and environment (block-tick) processing — across a worker thread pool.
 
-This is a mod for Minecraft (forge) versions 1.15.2 and 1.16.x that enables multithreading
-
-Currently it supports multithreading worlds, entities, tile entities, and environment ticks; 
-under testing it has appeared to work with mods.
-
-Under single player testing, there is a nominal drop of 20-50% in tps enabled vs disabled and little measurable difference between disabled and not installed. Note: this is a processing side (i.e. either internal or dedicated server) mod and is unlikely cause any increase in framerates. 
-
-Also note that this WILL allow vanilla clients to connect to a server with just this mod and forge installed.
-
-## IMPORTANT NOTICE
-
-This fecks around with a LOT of minecraft's internal processing loops. If you are using this with any other mods; it may break. If you do something in vanilla, it might still break. It might break simply by you looking at it. It is almost impossible to test every possible interaction that CAN occur; all I can say is that it's worked in every case I've tested.
-
-DO NOT, under any circumstances, report errors under this mod back to the mod author unless they have EXPLICITLY stated they are attempting to support it. Should mod devs wish to support this in any way, please yell so I can add registration apis.
-
-TO MODDERS: This mod logs at warn level to the log saying it is installed every ~3 minutes and that the logs are invalid. It should be really obvious.
-
-## Installing
-
-Simply install the jar like you normally would any other mod; it's that simple. 
-
-There are different jars for 1.15.2 and 1.16.1 as while exactly 1 method thing changed to break transferability, there is no way for me to deal with it in a single jar. So make sure you get the right one.
-
-## Getting involved
-
-If you want to get involved with the project there are several things you can do:
-
-- There is a currently seperate version of this mod that is [working on fabric support](https://github.com/himekifee/MCMTFabric)
-- We have a discord (link at top of github readme) that is where I'm going to try and organsie stuff
-- Create an issue with as much detail as possible (or comment on ones that are already there with more info)
-- Contribute code
+This repository is the **1.12.2 / Forge 14.23.5.2860** port (branch `1122`) of [jediminer543/JMT-MCMT](https://github.com/jediminer543/JMT-MCMT), which targets 1.15.2/1.16.x. The original 1.16 sources are kept under `deprecated/` as reference material.
 
 ## How it works
 
-The normal minecraft server loop is:
+Vanilla ticks serially:
 
 ```py
-def tick() :
-	for world in worlds:
-		# random stuff
-		for chunk in world.loadedchunks:
-			chunk.tickEnvironment()
-		# random stuff
-		for entity in world.entities:
-			entity.tick()
-		for tileEntity in world.tileEntities:
-			tileEntity.tick()
+def tick():
+    for world in worlds:
+        for chunk in world.loadedChunks: chunk.tickEnvironment()
+        for entity in world.entities:    entity.tick()
+        for te in world.tileEntities:    te.tick()
 ```
 
-All this mod does is parallelise each of these loops these loops. The vast majority of the performance (at least in my testing) was gained from parallelising entites.
+MCMT dispatches each of these loops onto a shared `ForkJoinPool`. Each loop is independently toggleable via config (`parallelWorld`, `parallelEntities`, `parallelTE`, `parallelEnv`). Concurrent access is guarded by:
 
-Each one of the above loops is paralelised, and each one is toggleable.
+- **`ChunkLock`** — a striped global lock keyed by chunk coordinates, used for env-chunk ticks so neighbouring chunks can't race on shared state (fluid flow, redstone wire updates).
+- **Synchronized wrappers** injected by the coremod around `WorldServer` scheduled-tick access (`pendingTickListEntries*`) and `World` entity-list mutations (`loadedEntityList`, `unloadedEntityList`).
+- **Graceful degradation** — on unsupported conditions (multiple servers, config kill-switch) the hooks fall back to vanilla serial execution instead of crashing.
 
-To make this parallelisation work, there are a lot of patches to the minecraft core code to avoid concurrent access to non-concurrent objects (curse ye fastutil) or to replace them with a working concurrent alternative.
+## Architecture
 
-Further, this mod adds it's own chunk caching into the mix, in order to provide paralellised access to chunks; this does mean it may consume some more memory though.
+```mermaid
+flowchart TD
+    subgraph Forge ["Minecraft Server (Forge 1.12.2)"]
+        MS[MinecraftServer<br/>updateTimeLightAndEntities]
+        WS[WorldServer.tick]
+        ENV[chunk env tick<br/>mcmt$tickEnvChunk]
+        ENT[entity list iteration]
+        TE[tile entity tick]
+    end
 
-I'll attempt to add more documentation as time goes by on how this works on the gritty internal level.
+    subgraph Coremod ["coremod (load-time ASM)"]
+        LP[MCMTLoadingPlugin<br/>IFMLLoadingPlugin]
+        CT[MCMTClassTransformer<br/>patches MS / World / WorldServer /<br/>DedicatedServer + sync wrappers]
+    end
 
-## Compiling
+    subgraph Runtime ["org.jmt.mcmt"]
+        HT[ASMHookTerminator<br/>hook terminators + counters]
+        POOL[(ForkJoinPool<br/>worker threads)]
+        CL[ChunkLock<br/>striped chunk-coord locks]
+        CFG[GeneralConfig<br/>parallelWorld / Entities /<br/>TE / Env, black/whitelists]
+        CMD[CommandMCMT<br/>/mcmt stats + config]
+    end
 
-TODO: write properly
+    LP -->|registers| CT
+    CT -->|"ASM hooks → INVOKESTATIC"| HT
+    MS -->|callTick| HT
+    WS -->|callEnvTick| HT
+    WS -->|callEntityTick| HT
+    WS -->|callTileEntityTick| HT
+    HT -->|"submit task"| POOL
+    POOL --> ENV & ENT & TE
+    HT -->|lock / unlock around env tick| CL
+    CFG --> HT
+    CMD --> CFG
+    HT -.crash report section.-> MS
+```
 
-In summary:
+## Port status
 
-Get a download of the repo:
+| Area | Status |
+| --- | --- |
+| Toolchain (JDK 8, ForgeGradle 2.3 fork, `stable_39` mappings) | ✅ |
+| Coremod harness + binpatches | ✅ |
+| Parallel world / entity / TE / env-chunk hooks | ✅ |
+| Stats command + crash-report integration | ✅ |
+| Synced wrappers (scheduled ticks, entity lists) | ✅ |
+| serdes, JMX, syncfu, fastutil concurrent maps | ❌ not ported |
 
-`git clone [the url of the page you are on now]`
+`parallelEnv`, `parallelEntities`, and `parallelTE` default to **false** — env ticks need the unported serdes serialisation, and entity/TE parallelism races against mods that iterate `loadedEntityList` (e.g. FoamFix CME crashes). Ship only the `reobfJar` output to production.
 
-(Or download a zip and unzip it; it's up to you)
+## Building
 
-Open the directory containing it in a command line and run:
+Requires JDK 8. From the repo root:
 
-`./gradlew build`
+```sh
+./gradlew build
+```
 
-The resulting jar will be present in `./build/libs/`
+The production jar lands in `build/libs/` (use the `reobfJar` artifact). Dev toolchain details live in `etc/buildscripts/`.
 
-## TODO LIST
+## Disclaimer
 
-- Parallelise more stuff
-- Hack the planet
-- Document everything so it's reproducable
+This mod rewrites Minecraft's internal processing loops with concurrency. Combined with other mods it may break; errors under this mod should not be reported to unrelated mod authors. The 1.12.2 port is experimental — test on a backup world first.

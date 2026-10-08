@@ -384,10 +384,14 @@ public class MCMTClassTransformer implements IClassTransformer
         // unloadedEntityList via Chunk.setChunkDataFromThis -> World.unloadEntities
         // during chunk loading in world.tick; lock both monitors in order.
         synchronizeOnFields(cn, new String[] { "updateEntities", "func_72939_s" }, "()V",
-                new String[] { "net/minecraft/world/World", "net/minecraft/world/World" },
-                new String[][] { entityField, unloadedField },
-                new String[] { "Ljava/util/List;", "Ljava/util/List;" },
-                "loadedEntityList+unloadedEntityList");
+                new String[] { "net/minecraft/world/World", "net/minecraft/world/World", "net/minecraft/world/World" },
+                new String[][] { entityField, unloadedField, { "weatherEffects", "field_73007_j" } },
+                new String[] { "Ljava/util/List;", "Ljava/util/List;", "Ljava/util/List;" },
+                "loadedEntityList+unloadedEntityList+weatherEffects");
+        synchronizeOnField(cn, new String[] { "addWeatherEffect", "func_72942_c" },
+                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World",
+                new String[] { "weatherEffects", "field_73007_j" }, "Ljava/util/List;",
+                "weatherEffects");
         synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
                 "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
                 "loadedEntityList");
@@ -644,6 +648,12 @@ public class MCMTClassTransformer implements IClassTransformer
                 "(Ljava/util/Collection;)V", "net/minecraft/world/World",
                 new String[] { "unloadedEntityList", "field_72997_g" }, "Ljava/util/List;",
                 "unloadedEntityList");
+        // weatherEffects is iterated in updateEntities and added to by lightning
+        // /weather entities spawned from entity ticks
+        synchronizeOnField(cn, new String[] { "addWeatherEffect", "func_72942_c" },
+                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World",
+                new String[] { "weatherEffects", "field_73007_j" }, "Ljava/util/List;",
+                "weatherEffects");
 
         // COMPUTE_FRAMES: the loadedEntityList sync wrappers add try/catch
         // handler entries that need stackmap frames (COMPUTE_MAXS leaves them
