@@ -378,8 +378,16 @@ public class MCMTClassTransformer implements IClassTransformer
         // injection anchor is absent from the wrapper body) - that injected
         // iterator was the CME crash site in the 219-mod pack.
         String[] entityField = { "loadedEntityList", "field_72996_f" };
-        synchronizeOnField(cn, new String[] { "updateEntities", "func_72939_s" }, "()V",
-                "net/minecraft/world/World", entityField, "Ljava/util/List;", "loadedEntityList");
+        String[] unloadedField = { "unloadedEntityList", "field_72997_g" };
+        // updateEntities iterates BOTH entity lists (vanilla removal block and
+        // foamfix's hoisted removeUnloadedEntities), while pool threads add to
+        // unloadedEntityList via Chunk.setChunkDataFromThis -> World.unloadEntities
+        // during chunk loading in world.tick; lock both monitors in order.
+        synchronizeOnFields(cn, new String[] { "updateEntities", "func_72939_s" }, "()V",
+                new String[] { "net/minecraft/world/World", "net/minecraft/world/World" },
+                new String[][] { entityField, unloadedField },
+                new String[] { "Ljava/util/List;", "Ljava/util/List;" },
+                "loadedEntityList+unloadedEntityList");
         synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
                 "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
                 "loadedEntityList");
@@ -405,6 +413,13 @@ public class MCMTClassTransformer implements IClassTransformer
     private void synchronizeOnField(ClassNode cn, String[] names, String desc, String fieldOwner,
             String[] fieldNames, String fieldType, String logName)
     {
+        synchronizeOnFields(cn, names, desc, new String[] { fieldOwner },
+                new String[][] { fieldNames }, new String[] { fieldType }, logName);
+    }
+
+    private void synchronizeOnFields(ClassNode cn, String[] names, String desc, String[] fieldOwners,
+            String[][] fieldNamesList, String[] fieldTypes, String logName)
+    {
         MethodNode m = null;
         for (MethodNode mn : cn.methods)
         {
@@ -426,48 +441,54 @@ public class MCMTClassTransformer implements IClassTransformer
             LOG.error("sync target not found: " + names[0]);
             return;
         }
-        String fieldName = null;
-        for (FieldNode fn : cn.fields)
+        String[] resolved = new String[fieldNamesList.length];
+        for (int i = 0; i < fieldNamesList.length; i++)
         {
-            for (String f : fieldNames)
+            String[] fieldNames = fieldNamesList[i];
+            String fieldName = null;
+            for (FieldNode fn : cn.fields)
             {
-                if (fn.name.equals(f))
+                for (String f : fieldNames)
                 {
-                    fieldName = fn.name;
-                    break;
+                    if (fn.name.equals(f))
+                    {
+                        fieldName = fn.name;
+                        break;
+                    }
                 }
+                if (fieldName != null)
+                    break;
             }
-            if (fieldName != null)
-                break;
-        }
-        if (fieldName == null)
-        {
-            // inherited field (declared on a superclass we do not see here):
-            // pick the candidate matching this class's naming mode (func_/field_
-            // prefixes appear together with SRG names, plain names with MCP)
-            boolean srg = false;
-            for (MethodNode mn : cn.methods)
+            if (fieldName == null)
             {
-                if (mn.name.startsWith("func_"))
+                // inherited field (declared on a superclass we do not see here):
+                // pick the candidate matching this class's naming mode (func_/field_
+                // prefixes appear together with SRG names, plain names with MCP)
+                boolean srg = false;
+                for (MethodNode mn : cn.methods)
                 {
-                    srg = true;
-                    break;
+                    if (mn.name.startsWith("func_"))
+                    {
+                        srg = true;
+                        break;
+                    }
                 }
+                for (String f : fieldNames)
+                    if (f.startsWith("field_") == srg)
+                    {
+                        fieldName = f;
+                        break;
+                    }
             }
-            for (String f : fieldNames)
-                if (f.startsWith("field_") == srg)
-                {
-                    fieldName = f;
-                    break;
-                }
-        }
-        if (fieldName == null)
-        {
-            LOG.error(logName + " field not found in " + cn.name);
-            return;
+            if (fieldName == null)
+            {
+                LOG.error(logName + " field not found in " + cn.name);
+                return;
+            }
+            resolved[i] = fieldName;
         }
         // Rename the original and emit a wrapper that runs it inside
-        // synchronized(this.pendingTickListEntriesTreeSet). The wrapper uses
+        // synchronized(f1), synchronized(f2), ... in order. The wrapper uses
         // no new locals so the frame layout of the exception handler stays
         // trivially correct under COMPUTE_FRAMES.
         String wrapperName = m.name;
@@ -479,9 +500,12 @@ public class MCMTClassTransformer implements IClassTransformer
         LabelNode start = new LabelNode();
         LabelNode handler = new LabelNode();
         b.add(start);
-        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
-        b.add(new InsnNode(Opcodes.MONITORENTER));
+        for (int i = 0; i < resolved.length; i++)
+        {
+            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
+            b.add(new InsnNode(Opcodes.MONITORENTER));
+        }
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
         b.add(new LdcInsnNode(wrapperName + " enter"));
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
@@ -501,14 +525,20 @@ public class MCMTClassTransformer implements IClassTransformer
         b.add(new LdcInsnNode(wrapperName + " exit"));
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
                 "(Ljava/lang/Object;Ljava/lang/String;)V", false));
-        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
-        b.add(new InsnNode(Opcodes.MONITOREXIT));
+        for (int i = resolved.length - 1; i >= 0; i--)
+        {
+            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
+            b.add(new InsnNode(Opcodes.MONITOREXIT));
+        }
         b.add(new InsnNode(Type.getReturnType(desc).getOpcode(Opcodes.IRETURN)));
         b.add(handler);
-        b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwner, fieldName, fieldType));
-        b.add(new InsnNode(Opcodes.MONITOREXIT));
+        for (int i = resolved.length - 1; i >= 0; i--)
+        {
+            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
+            b.add(new InsnNode(Opcodes.MONITOREXIT));
+        }
         b.add(new InsnNode(Opcodes.ATHROW));
         w.tryCatchBlocks.add(new TryCatchBlockNode(start, handler, handler, null));
         cn.methods.add(w);
@@ -610,6 +640,10 @@ public class MCMTClassTransformer implements IClassTransformer
         synchronizeOnField(cn, new String[] { "removeEntityDangerously", "func_72973_f" },
                 "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
                 "loadedEntityList");
+        synchronizeOnField(cn, new String[] { "unloadEntities", "func_175681_c" },
+                "(Ljava/util/Collection;)V", "net/minecraft/world/World",
+                new String[] { "unloadedEntityList", "field_72997_g" }, "Ljava/util/List;",
+                "unloadedEntityList");
 
         // COMPUTE_FRAMES: the loadedEntityList sync wrappers add try/catch
         // handler entries that need stackmap frames (COMPUTE_MAXS leaves them
