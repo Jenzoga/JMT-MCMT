@@ -25,7 +25,7 @@ Owns: mod entry point, coremod harness, ASM hook destination, config, commands. 
 ## Verification
 
 - `./gradlew compileJava` green; `./gradlew runServer` boots to `Done (...)!` (dev server needs a free port — set `run/server.properties` `server-port` if 25565 is taken).
-- Production artifacts must come from `./gradlew reobfJar` (output `build/libs/jmt_mcmt-*.jar`); a plain `jar` ships MCP names and crashes with `AbstractMethodError` in production.
+- Production artifacts must come from `./gradlew reobfJar` (output `build/libs/jmt_mcmt-*.jar`); a plain `jar` ships MCP names and crashes with `AbstractMethodError` in production. `runServer` also rebuilds that jar with MCP names and silently overwrites it, and a later plain `reobfJar` can report success without rewriting — after any `runServer`, ship only via `./gradlew reobfJar --rerun-tasks` and confirm with `javap -p` on `CommandMCMT` (methods must read `func_71517_b`/`func_71518_a`).
 - Prod-class-state check: `/tmp/prodtest` harness (forge installer offline install + dep classpath from FG caches, `FMLServerTweaker` launch) runs the reobfuscated jar against real SRG/obfuscated classes; verify all patch lines appear and a fresh-world 10-minute soak is exception-free. Debug tick-list drift with `-Dmcmt.debug=true`.
 
 ## Child DOX Index
