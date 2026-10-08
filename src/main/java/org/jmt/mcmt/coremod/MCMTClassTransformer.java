@@ -80,6 +80,17 @@ public class MCMTClassTransformer implements IClassTransformer
                 LOG.error("MCMT failed to patch WorldServer, running without env parallelism", e);
             }
         }
+        if (transformedName.equals("net.minecraft.entity.EntityTracker"))
+        {
+            try
+            {
+                return patchEntityTracker(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch EntityTracker, running without entity parallelism safety", e);
+            }
+        }
         return basicClass;
     }
 
@@ -404,6 +415,60 @@ public class MCMTClassTransformer implements IClassTransformer
 
         cn.accept(cw);
         LOG.info("Patched WorldServer: env tick per-chunk dispatch + mcmt$tickEnvChunk extraction + scheduled-tick sync");
+        return cw.toByteArray();
+    }
+
+    private byte[] patchEntityTracker(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        // entries is a private Set<EntityTrackerEntry>; private fields are not
+        // mapped, so resolve by descriptor instead of name (dev MCP vs prod notch)
+        String entriesName = null;
+        for (FieldNode fn : cn.fields)
+        {
+            if (fn.desc.equals("Ljava/util/Set;"))
+            {
+                entriesName = fn.name;
+                break;
+            }
+        }
+        if (entriesName == null)
+        {
+            LOG.error("EntityTracker.entries Set field not found");
+            return in;
+        }
+        // EntityTracker.tick iterates entries on the main thread while pool-thread
+        // entity add/remove reaches track/untrack via WorldServer.onEntity* (CME)
+        synchronizeOnField(cn, new String[] { "tick", "func_72788_a" }, "()V",
+                "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
+                "trackerEntries");
+        synchronizeOnField(cn, new String[] { "track", "func_72786_a" }, "(Lnet/minecraft/entity/Entity;)V",
+                "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
+                "trackerEntries");
+        synchronizeOnField(cn, new String[] { "track", "func_72791_a" }, "(Lnet/minecraft/entity/Entity;II)V",
+                "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
+                "trackerEntries");
+        synchronizeOnField(cn, new String[] { "untrack", "func_72790_b" }, "(Lnet/minecraft/entity/Entity;)V",
+                "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
+                "trackerEntries");
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2)
+            {
+                try
+                {
+                    return super.getCommonSuperClass(type1, type2);
+                }
+                catch (Exception e)
+                {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        cn.accept(cw);
+        LOG.info("Patched EntityTracker: trackerEntries synchronization");
         return cw.toByteArray();
     }
 
