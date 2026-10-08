@@ -1,88 +1,50 @@
-# Build Directories #
-#####################
-# Directories with built content - not needed
-/bin
-/build
+# Build outputs
+/bin/
+/build/
+/out/
+/eclipse/
+/run/
+/mods/
+/Documentation-*/
 
-# Gradle #
-##########
-# Ignores all gradle files
-/.gradle
+# Gradle
+/.gradle/
+/gradle-app.setting
 
-# Git Stuff #
-#############
-# Removes strange git stuff such as temporary markdown previews.
-/.README.md.html
-
-# Eclipse #
-###########
-# Project configuration should be handled by gradle
-# USE gradle:
-.project
-.classpath
-/.settings
-
-# Idea #
-########
-# Idea project config
-# Idea users should target the project as a gradle project
+# IDE
+/.settings/
+/.project
+/.classpath
+/.idea/
+/.vscode/
+/.metadata/
 *.iml
-/.idea
-Documentation-1.12.x/
-
-# Java #
-########
-# Error files
-hs_err_pid*.log
-replay_pid*.log
-*.class
-
-# File Changes#
-###############
-# Hides files that have been renamed
-# And backups of files
-*.old
-/*.old
-*.bak
-/*.bak
-
-# FORGE GRADLE DEFAULTS #
-#########################
-# eclipse
-bin
-*.launch
-.settings
-.metadata
-.classpath
-.project
-
-# idea
-out
 *.ipr
 *.iws
-*.iml
-.idea
+*.launch
 
-# gradle
-build
-.gradle
+# Java crashes & dumps
+hs_err_pid*
+replay_pid*
+*.hprof
+.attach_pid*
+java_error_in_*
 
-# other
-eclipse
-run
+# Logs
+/logs/
+/logs/*
+*.log
+consolelog.log
 
-# Files from Forge MDK
+# Forge MDK leftovers
 forge*changelog.txt
 
-# OTHER STUFF #
-###############
-# TODO
-consolelog.log
-src/main/resources/META-INF/mods.toml
-logs/*
+# Backups & temp files
+*.old
+*.bak
+*.tmp
+*.class
 
-mods/
-*.log
-/*.log
-
+# OS junk
 .DS_Store
+Thumbs.db
