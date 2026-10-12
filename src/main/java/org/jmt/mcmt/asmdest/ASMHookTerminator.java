@@ -123,6 +123,20 @@ public class ASMHookTerminator
         p.register();
     }
 
+    /**
+     * Blocks until every world/entity/TE/env task dispatched for the CURRENT
+     * tick has finished, without retiring the phaser. Called from the server
+     * thread between WorldServer.tick dispatch and the post-world-tick event,
+     * so mod post-tick handlers (which iterate loadedEntityList and other
+     * shared structures unlocked) can never observe a half-mutated world.
+     */
+    public static void awaitCurrentTick()
+    {
+        Phaser barrier = p;
+        if (barrier != null)
+            barrier.arriveAndAwaitAdvance();
+    }
+
     public static void callTick(WorldServer world, MinecraftServer server)
     {
         if (GeneralConfig.disabled || !GeneralConfig.parallelWorld || p == null)

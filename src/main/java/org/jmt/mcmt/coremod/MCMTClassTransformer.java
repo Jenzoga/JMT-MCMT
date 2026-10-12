@@ -93,6 +93,17 @@ public class MCMTClassTransformer implements IClassTransformer
                 LOG.error("MCMT failed to patch EntityTracker, running without entity parallelism safety", e);
             }
         }
+        if (transformedName.equals("net.minecraft.world.biome.BiomeCache"))
+        {
+            try
+            {
+                return patchBiomeCache(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch BiomeCache, running without cache synchronization", e);
+            }
+        }
         if (transformedName.equals("net.minecraftforge.common.DimensionManager"))
         {
             try
@@ -156,6 +167,38 @@ public class MCMTClassTransformer implements IClassTransformer
     // Dimension cycling (FML unloadWorlds during tick) must not tear a WorldServer
     // while pool threads are mid-tick: await in-flight tasks first. The method is
     // Forge-owned (unobfuscated), so the name matches in dev and prod alike.
+    // BiomeCache is a static-global Long2ObjectOpenHashMap cleaned up from
+    // WorldServer.tick (BiomeProvider.climateChange); with parallelWorld two
+    // dimension tasks rehash it concurrently and corrupt it (AIOOBE in
+    // removeEntry, prodtest 2026-10-12). Synchronize cleanup on the instance.
+    private byte[] patchBiomeCache(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        synchronizeOnField(cn, new String[] { "cleanupCache", "func_76838_a" }, "()V",
+                "net/minecraft/world/biome/BiomeCache",
+                new String[] { "field_76844_a", "provider" }, "Lnet/minecraft/world/biome/BiomeProvider;",
+                "biomeCache");
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2)
+            {
+                try
+                {
+                    return super.getCommonSuperClass(type1, type2);
+                }
+                catch (Exception e)
+                {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        cn.accept(cw);
+        LOG.info("Patched BiomeCache: cleanup synchronization");
+        return cw.toByteArray();
+    }
+
     private byte[] patchDimensionManager(byte[] in)
     {
         ClassNode cn = new ClassNode();
@@ -1146,10 +1189,11 @@ public class MCMTClassTransformer implements IClassTransformer
             LOG.info("Patched MinecraftServer: churn harness entry");
         }
 
-        // Post-world-tick mod handlers (BetterSurvival/switchbow iterate
-        // loadedEntityList unlocked) run while pool tasks are still in flight;
-        // wrap each FMLCommonHandler.onPostWorldTick call site with the entity
-        // monitor pair so mod iteration serializes against wrapper mutations.
+        // Post-tick mod handlers (BetterSurvival/switchbow iterate shared
+        // structures unlocked) must not run while this tick's pool tasks are
+        // still in flight: await the tick barrier before each
+        // FMLCommonHandler.onPostWorldTick call site. One INVOKESTATIC, no
+        // monitors, no new locals — frame-safe in dev and prod.
         int q2 = 0;
         for (AbstractInsnNode ain = m.instructions.getFirst(); ain != null; )
         {
@@ -1162,31 +1206,10 @@ public class MCMTClassTransformer implements IClassTransformer
                         && (mi.name.equals("onPostWorldTick") || mi.name.equals("func_71385_c"))
                         && mi.desc.equals("(Lnet/minecraft/world/World;)V"))
                 {
-                    // updateTimeLightAndEntities keeps the current WorldServer in
-                    // local slot 6 (astore 6 after DimensionManager.getWorld);
-                    // enter loadedChunks then loadedEntityList, matching the
-                    // wrapper hierarchy; a mod-handler exception tears the
-                    // server down anyway (vanilla crash path), so no finally
                     InsnList wIn = new InsnList();
-                    wIn.add(new VarInsnNode(Opcodes.ALOAD, 6));
-                    wIn.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedChunks",
-                            "(Ljava/lang/Object;)Ljava/lang/Object;", false));
-                    wIn.add(new InsnNode(Opcodes.MONITORENTER));
-                    wIn.add(new VarInsnNode(Opcodes.ALOAD, 6));
-                    wIn.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedEntityList",
-                            "(Lnet/minecraft/world/World;)Ljava/lang/Object;", false));
-                    wIn.add(new InsnNode(Opcodes.MONITORENTER));
+                    wIn.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "awaitCurrentTick",
+                            "()V", false));
                     m.instructions.insertBefore(mi, wIn);
-                    InsnList wOut = new InsnList();
-                    wOut.add(new VarInsnNode(Opcodes.ALOAD, 6));
-                    wOut.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedEntityList",
-                            "(Lnet/minecraft/world/World;)Ljava/lang/Object;", false));
-                    wOut.add(new InsnNode(Opcodes.MONITOREXIT));
-                    wOut.add(new VarInsnNode(Opcodes.ALOAD, 6));
-                    wOut.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedChunks",
-                            "(Ljava/lang/Object;)Ljava/lang/Object;", false));
-                    wOut.add(new InsnNode(Opcodes.MONITOREXIT));
-                    m.instructions.insert(mi, wOut);
                     q2++;
                 }
             }
@@ -1195,7 +1218,7 @@ public class MCMTClassTransformer implements IClassTransformer
         if (q2 == 0)
             LOG.error("onPostWorldTick call site not found in updateTimeLightAndEntities");
         else
-            LOG.info("Patched MinecraftServer: post-tick entity monitor x" + q2);
+            LOG.info("Patched MinecraftServer: post-tick barrier x" + q2);
 
         // Shutdown quiescence: await in-flight pool tick tasks before the server
         // tears worlds down (unloadWorlds races loadedChunkMap otherwise).
