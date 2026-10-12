@@ -219,6 +219,24 @@ public final class DevChurn
             try
             {
                 Chunk c = cps.provideChunk(cx, cz);
+                // env tick under the same 3x3 lock shape callEnvTick uses —
+                // exercises cross-chunk block-update paths against pool dispatch
+                if (c != null)
+                {
+                    try
+                    {
+                        java.lang.reflect.Method m = ws.getClass().getDeclaredMethod("mcmt$tickEnvChunk",
+                                Chunk.class, int.class, boolean.class, boolean.class);
+                        m.setAccessible(true);
+                        m.invoke(ws, c, ws.getGameRules().getInt("randomTickSpeed"),
+                                ws.isRaining(), ws.isThundering());
+                    }
+                    catch (ReflectiveOperationException ignored)
+                    {
+                        // extraction not applied (shouldDispatchEnv path); the
+                        // per-chunk env tick still runs inside updateBlocks
+                    }
+                }
                 if (c != null && r.nextBoolean())
                     cps.queueUnload(c);
             }

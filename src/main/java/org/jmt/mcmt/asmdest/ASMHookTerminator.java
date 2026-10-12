@@ -293,6 +293,10 @@ public class ASMHookTerminator
             try
             {
                 currentEnvs.incrementAndGet();
+                // 3x3 neighborhood (1.16 serdes ChunkLockPool range=1 semantics):
+                // random-tick block updates propagate one block into neighbor
+                // chunks, so a neighbor's blocks/TEs must not be concurrently
+                // modified by its own env tick or by chunk churn.
                 locks = org.jmt.mcmt.paralelised.ChunkLock.INSTANCE.lock(chunk.x, chunk.z, 1);
                 invokeEnvTick(world, chunk, randomTickSpeed, raining, thundering);
             }
@@ -328,6 +332,16 @@ public class ASMHookTerminator
         if (world instanceof net.minecraft.world.gen.ChunkProviderServer)
             return ((net.minecraft.world.gen.ChunkProviderServer) world).loadedChunks;
         return world;
+    }
+
+    /**
+     * Monitor accessor for World.loadedEntityList, used by the FMLCommonHandler
+     * post-tick wrapper (a non-World class cannot GETFIELD it directly).
+     * Do not rename; injected bytecode references it by name.
+     */
+    public static Object getLoadedEntityList(World world)
+    {
+        return world.loadedEntityList;
     }
 
     /**

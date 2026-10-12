@@ -182,7 +182,6 @@ public class MCMTClassTransformer implements IClassTransformer
         LOG.info("Patched DimensionManager: unload quiescence");
         return cw.toByteArray();
     }
-
     private byte[] patchWorldServer(byte[] in)
     {
         ClassNode cn = new ClassNode();
@@ -1146,6 +1145,57 @@ public class MCMTClassTransformer implements IClassTransformer
             run.instructions.insert(boot);
             LOG.info("Patched MinecraftServer: churn harness entry");
         }
+
+        // Post-world-tick mod handlers (BetterSurvival/switchbow iterate
+        // loadedEntityList unlocked) run while pool tasks are still in flight;
+        // wrap each FMLCommonHandler.onPostWorldTick call site with the entity
+        // monitor pair so mod iteration serializes against wrapper mutations.
+        int q2 = 0;
+        for (AbstractInsnNode ain = m.instructions.getFirst(); ain != null; )
+        {
+            AbstractInsnNode next = ain.getNext();
+            if (ain instanceof MethodInsnNode)
+            {
+                MethodInsnNode mi = (MethodInsnNode) ain;
+                if (mi.getOpcode() == Opcodes.INVOKEVIRTUAL
+                        && mi.owner.equals("net/minecraftforge/fml/common/FMLCommonHandler")
+                        && (mi.name.equals("onPostWorldTick") || mi.name.equals("func_71385_c"))
+                        && mi.desc.equals("(Lnet/minecraft/world/World;)V"))
+                {
+                    // updateTimeLightAndEntities keeps the current WorldServer in
+                    // local slot 6 (astore 6 after DimensionManager.getWorld);
+                    // enter loadedChunks then loadedEntityList, matching the
+                    // wrapper hierarchy; a mod-handler exception tears the
+                    // server down anyway (vanilla crash path), so no finally
+                    InsnList wIn = new InsnList();
+                    wIn.add(new VarInsnNode(Opcodes.ALOAD, 6));
+                    wIn.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedChunks",
+                            "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+                    wIn.add(new InsnNode(Opcodes.MONITORENTER));
+                    wIn.add(new VarInsnNode(Opcodes.ALOAD, 6));
+                    wIn.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedEntityList",
+                            "(Lnet/minecraft/world/World;)Ljava/lang/Object;", false));
+                    wIn.add(new InsnNode(Opcodes.MONITORENTER));
+                    m.instructions.insertBefore(mi, wIn);
+                    InsnList wOut = new InsnList();
+                    wOut.add(new VarInsnNode(Opcodes.ALOAD, 6));
+                    wOut.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedEntityList",
+                            "(Lnet/minecraft/world/World;)Ljava/lang/Object;", false));
+                    wOut.add(new InsnNode(Opcodes.MONITOREXIT));
+                    wOut.add(new VarInsnNode(Opcodes.ALOAD, 6));
+                    wOut.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedChunks",
+                            "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+                    wOut.add(new InsnNode(Opcodes.MONITOREXIT));
+                    m.instructions.insert(mi, wOut);
+                    q2++;
+                }
+            }
+            ain = next;
+        }
+        if (q2 == 0)
+            LOG.error("onPostWorldTick call site not found in updateTimeLightAndEntities");
+        else
+            LOG.info("Patched MinecraftServer: post-tick entity monitor x" + q2);
 
         // Shutdown quiescence: await in-flight pool tick tasks before the server
         // tears worlds down (unloadWorlds races loadedChunkMap otherwise).
