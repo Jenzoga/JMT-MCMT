@@ -83,3 +83,4 @@ logs/*
 # CodeGraph #
 #############
 /.codegraph
+*.log

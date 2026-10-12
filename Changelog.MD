@@ -2,7 +2,7 @@
 
 Mostly here for my own sanity
 
-## 0.24.0-PRE (1.20.1 port)
+## 1.20.1-0.24.0-beta1 (1.20.1 port)
 
 - Ported to Minecraft 1.20.1 / Forge 47.4.13 (Java 17, ForgeGradle 6, Mojang official mappings)
 - ThreadingDetector patch made compatible with ASM 9.8 (Forge 47.4.x), which clears

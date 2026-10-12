@@ -14,7 +14,7 @@ plugins {
 
 version = "${mcmt_ver}"
 group = 'org.jmt.mcmt' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
-base.archivesName = "jmt_mcmt-${mc_ver}"
+base.archivesName = "jmt_mcmt"
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
@@ -99,9 +99,7 @@ jar {
             "Implementation-Title": project.name,
             "Implementation-Version": "${version}",
             "Implementation-Vendor" :"jmtmakesthings",
-            "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
-            // Coremods must be declared via manifest attribute since FML 1.17+
-            "CoreModFile": "META-INF/coremods.json"
+            "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
         ])
     }
 }

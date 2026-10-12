@@ -208,13 +208,13 @@ public class GeneralConfig {
 		GENERAL.opsTracing.set(opsTracing);
 		GENERAL.logcap.set(logcap);
 		
-		GENERAL.teWhiteList.get().clear();
-		GENERAL.teWhiteList.get().addAll(teUnfoundWhiteList);
-		GENERAL.teWhiteList.get().addAll(teWhiteList.stream().map(clz -> clz.getName()).collect(Collectors.toList()));
+		List<String> whiteList = new ArrayList<>(teUnfoundWhiteList);
+		whiteList.addAll(teWhiteList.stream().map(clz -> clz.getName()).collect(Collectors.toList()));
+		GENERAL.teWhiteList.set(whiteList);
 
-		GENERAL.teBlackList.get().clear();
-		GENERAL.teBlackList.get().addAll(teUnfoundBlackList);
-		GENERAL.teBlackList.get().addAll(teBlackList.stream().map(clz -> clz.getName()).collect(Collectors.toList()));
+		List<String> blackList = new ArrayList<>(teUnfoundBlackList);
+		blackList.addAll(teBlackList.stream().map(clz -> clz.getName()).collect(Collectors.toList()));
+		GENERAL.teBlackList.set(blackList);
 		
 		GENERAL_SPEC.save();
 	}
@@ -235,8 +235,8 @@ public class GeneralConfig {
 		
 		public final BooleanValue disableTileEntity;
 		public final BooleanValue chunkLockModded;
-		public final ConfigValue<List<String>> teWhiteList;
-		public final ConfigValue<List<String>> teBlackList;
+		public final ConfigValue<List<? extends String>> teWhiteList;
+		public final ConfigValue<List<? extends String>> teBlackList;
 		
 		public final BooleanValue disableEnvironment;
 		
@@ -299,11 +299,13 @@ public class GeneralConfig {
 					.comment("List of tile entity classes that will always be fully parallelised\n"
 							+ "This will occur even when chunkLockModded is set to true\n"
 							+ "Adding pistons to this will not parallelise them")
-					.define("teWhiteList", (List<String>)new ArrayList<String>());
+					.defineListAllowEmpty("teWhiteList", new ArrayList<String>(),
+							o -> o instanceof String s && !s.isEmpty());
 			teBlackList = builder
 					.comment("List of tile entity classes that will always be chunklocked\n"
 							+ "This will occur even when chunkLockModded is set to false")
-					.define("teBlackList", (List<String>)new ArrayList<String>());
+					.defineListAllowEmpty("teBlackList", new ArrayList<String>(),
+							o -> o instanceof String s && !s.isEmpty());
 			builder.pop();
 			builder.push("misc");
 			disableEnvironment = builder

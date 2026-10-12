@@ -1,7 +1,7 @@
 {
   "homepage": "https://github.com/jediminer543/JMT-MCMT",
   "1.20.1": {
-  	"0.24.0-PRE": "Initial 1.20.1 port; coremods rewritten for the 1.20.1 class layout"
+  	"1.20.1-0.24.0-beta1": "Initial 1.20.1 port; coremods rewritten for the 1.20.1 class layout"
   },
   "1.16.5": {
   	"0.21.80": "Fix compatibility with CraftBukkit and Java 11",
@@ -41,8 +41,8 @@
     "0.17.52": "Added FU patching"
   },
   "promos": {
-  	"1.20.1-latest": "0.24.0-PRE",
-    "1.20.1-recommended": "0.24.0-PRE",
+  	"1.20.1-latest": "1.20.1-0.24.0-beta1",
+    "1.20.1-recommended": "1.20.1-0.24.0-beta1",
   	"1.16.5-latest": "0.21.80",
     "1.16.5-recommended": "0.21.80",
   	"1.16.3-latest": "0.21.80",
