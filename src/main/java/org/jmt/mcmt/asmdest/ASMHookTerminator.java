@@ -312,6 +312,80 @@ public class ASMHookTerminator
         });
     }
 
+    /**
+     * Cross-hierarchy monitor accessor for the ChunkProviderServer.loadedChunks
+     * map, injected by the coremod into wrappers declared on classes whose
+     * hierarchy cannot reach the field with GETFIELD (World, EntityTracker).
+     * Do not rename; injected bytecode references it by name.
+     */
+    public static Object getLoadedChunks(Object world)
+    {
+        // MUST return the same object for every caller: World wrappers and
+        // ChunkProviderServer wrappers must monitor one mutex, or two distinct
+        // objects let threads interleave and deadlock (DevChurn jstack).
+        if (world instanceof WorldServer)
+            return ((WorldServer) world).getChunkProvider().loadedChunks;
+        if (world instanceof net.minecraft.world.gen.ChunkProviderServer)
+            return ((net.minecraft.world.gen.ChunkProviderServer) world).loadedChunks;
+        return world;
+    }
+
+    /**
+     * Blocks until no world/entity/TE/env tick task is still in flight. Called
+     * from the server thread via the stopServer patch: without this, shutdown's
+     * DimensionManager.unloadWorlds iterates ChunkProviderServer.loadedChunkMap
+     * while pool-thread world ticks mutate it (ArrayIndexOutOfBounds found by
+     * DevChurn). No further preTick runs after serverRunning=false, so in-flight
+     * tasks are never awaited otherwise.
+     */
+    public static void quiesce()
+    {
+        // No further preTick runs after serverRunning=false, so tasks dispatched
+        // from here on (or still queued) must run inline: any surviving parallel
+        // dispatch would race the teardown threads.
+        GeneralConfig.disabled = true;
+        long deadline = System.currentTimeMillis() + 10_000L;
+        while ((currentWorlds.get() > 0 || currentEnts.get() > 0 || currentTEs.get() > 0
+                || currentEnvs.get() > 0) && System.currentTimeMillis() < deadline)
+        {
+            try
+            {
+                Thread.sleep(10);
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (System.currentTimeMillis() >= deadline)
+            LOGGER.warn("MCMT quiesce timeout, shutting down with tasks in flight");
+    }
+
+    /**
+     * Like {@link #quiesce()} but non-destructive: waits for in-flight tick tasks
+     * without disabling parallelism. Called from the DimensionManager.unloadWorlds
+     * patch so dimension cycling (unload + initDimension reload) cannot tear a
+     * WorldServer while a pool thread is still inside WorldServer.tick.
+     */
+    public static void waitInFlight()
+    {
+        long deadline = System.currentTimeMillis() + 10_000L;
+        while ((currentWorlds.get() > 0 || currentEnts.get() > 0 || currentTEs.get() > 0
+                || currentEnvs.get() > 0) && System.currentTimeMillis() < deadline)
+        {
+            try
+            {
+                Thread.sleep(5);
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     public static long[] lastTickTime = new long[32];
     public static int lastTickTimePos = 0;
     public static int lastTickTimeFill = 0;

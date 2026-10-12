@@ -34,6 +34,8 @@ public class MCMTClassTransformer implements IClassTransformer
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass)
     {
+        if (Boolean.getBoolean("mcmt.dump") && transformedName.startsWith("net.minecraft."))
+            dump(transformedName, basicClass);
         if (transformedName.equals("net.minecraft.server.MinecraftServer"))
         {
             try
@@ -91,6 +93,28 @@ public class MCMTClassTransformer implements IClassTransformer
                 LOG.error("MCMT failed to patch EntityTracker, running without entity parallelism safety", e);
             }
         }
+        if (transformedName.equals("net.minecraftforge.common.DimensionManager"))
+        {
+            try
+            {
+                return patchDimensionManager(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch DimensionManager, running without unload quiescence", e);
+            }
+        }
+        if (transformedName.equals("net.minecraft.world.gen.ChunkProviderServer"))
+        {
+            try
+            {
+                return patchChunkProviderServer(basicClass);
+            }
+            catch (Exception e)
+            {
+                LOG.error("MCMT failed to patch ChunkProviderServer, running without chunk-map safety", e);
+            }
+        }
         return basicClass;
     }
 
@@ -126,6 +150,36 @@ public class MCMTClassTransformer implements IClassTransformer
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cn.accept(cw);
         LOG.info("Patched DedicatedServer: crash-report integration");
+        return cw.toByteArray();
+    }
+
+    // Dimension cycling (FML unloadWorlds during tick) must not tear a WorldServer
+    // while pool threads are mid-tick: await in-flight tasks first. The method is
+    // Forge-owned (unobfuscated), so the name matches in dev and prod alike.
+    private byte[] patchDimensionManager(byte[] in)
+    {
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        MethodNode m = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.name.equals("unloadWorlds")
+                    && mn.desc.equals("(Ljava/util/Hashtable;)V"))
+            {
+                m = mn;
+                break;
+            }
+        }
+        if (m == null)
+        {
+            LOG.error("unloadWorlds not found in DimensionManager");
+            return in;
+        }
+        m.instructions.insert(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "waitInFlight",
+                "()V", false));
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cn.accept(cw);
+        LOG.info("Patched DimensionManager: unload quiescence");
         return cw.toByteArray();
     }
 
@@ -369,18 +423,62 @@ public class MCMTClassTransformer implements IClassTransformer
         };
         // Pool-thread entity/TE ticks can schedule block updates while this
         // world's tick drains the scheduled-tick lists; serialize both sides
-        // on the TreeSet monitor so the size invariant holds.
-        synchronizeOnTickList(cn, new String[] { "scheduleBlockUpdate", "func_180497_b" },
-                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V");
-        synchronizeOnTickList(cn, new String[] { "updateBlockTick", "func_175654_a" },
-                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V");
-        synchronizeOnTickList(cn, new String[] { "isBlockTickPending", "func_175691_a" },
-                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z");
-        synchronizeOnTickList(cn, new String[] { "isUpdateScheduled", "func_184145_b" },
-                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z");
-        synchronizeOnTickList(cn, new String[] { "tickUpdates", "func_72955_a" }, "(Z)Z");
-        synchronizeOnTickList(cn, new String[] { "getPendingBlockUpdates", "func_175712_a" },
-                "(Lnet/minecraft/world/gen/structure/StructureBoundingBox;Z)Ljava/util/List;");
+        // on the TreeSet monitor so the size invariant holds. Every TreeSet
+        // acquisition first takes loadedEntityList: pool-thread tickUpdates
+        // reaches spawnEntity/removeEntity via BlockFalling.checkFallable, so
+        // tree->entity ordering would invert against updateEntities' entity->tree
+        // iteration and deadlock (found by DevChurn: Server thread holds loaded
+        // waiting tree, pool thread holds tree waiting loaded).
+        String[] entityField2 = { "loadedEntityList", "field_72996_f" };
+        String[] tickListField = { "pendingTickListEntriesTreeSet", "field_73065_O" };
+        String[] chunkMapField = { "loadedChunks", "field_73244_f" };
+        synchronizeOnFields(cn, new String[] { "scheduleBlockUpdate", "func_180497_b" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
+        synchronizeOnFields(cn, new String[] { "updateBlockTick", "func_175654_a" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
+        synchronizeOnFields(cn, new String[] { "isBlockTickPending", "func_175691_a" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
+        synchronizeOnFields(cn, new String[] { "isUpdateScheduled", "func_184145_b" },
+                "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
+        synchronizeOnFields(cn, new String[] { "tickUpdates", "func_72955_a" }, "(Z)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
+        synchronizeOnFields(cn, new String[] { "getPendingBlockUpdates", "func_175712_a" },
+                "(Lnet/minecraft/world/gen/structure/StructureBoundingBox;Z)Ljava/util/List;",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/WorldServer" } },
+                new String[][] { chunkMapField, entityField2, tickListField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/TreeSet;" },
+                "loadedEntityList+pendingTickListEntriesTreeSet");
 
         // WorldServer overrides World's entity-list entry points, so the World
         // wrappers alone do not cover virtual dispatch on a WorldServer `this`.
@@ -390,32 +488,85 @@ public class MCMTClassTransformer implements IClassTransformer
         // iterator was the CME crash site in the 219-mod pack.
         String[] entityField = { "loadedEntityList", "field_72996_f" };
         String[] unloadedField = { "unloadedEntityList", "field_72997_g" };
+        String[] chunkMap = { "loadedChunks", "field_73244_f" };
         // updateEntities iterates BOTH entity lists (vanilla removal block and
         // foamfix's hoisted removeUnloadedEntities), while pool threads add to
         // unloadedEntityList via Chunk.setChunkDataFromThis -> World.unloadEntities
         // during chunk loading in world.tick; lock both monitors in order.
+        // loadedChunks FIRST: World.updateEntities calls getChunk (provider map)
+        // after taking the entity lists, while pool-thread ChunkProviderServer.tick
+        // mutates the map and reaches unloadEntities from it — entity->chunks would
+        // invert against chunks->entity and deadlock (DevChurn stack: Server thread
+        // holds entity lists waiting loadedChunks, pool thread holds loadedChunks
+        // waiting entity lists via Chunk.onUnload -> unloadEntities).
         synchronizeOnFields(cn, new String[] { "updateEntities", "func_72939_s" }, "()V",
-                new String[] { "net/minecraft/world/World", "net/minecraft/world/World", "net/minecraft/world/World" },
-                new String[][] { entityField, unloadedField, { "weatherEffects", "field_73007_j" } },
-                new String[] { "Ljava/util/List;", "Ljava/util/List;", "Ljava/util/List;" },
-                "loadedEntityList+unloadedEntityList+weatherEffects");
-        synchronizeOnField(cn, new String[] { "addWeatherEffect", "func_72942_c" },
-                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World",
-                new String[] { "weatherEffects", "field_73007_j" }, "Ljava/util/List;",
-                "weatherEffects");
-        synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
-                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "onEntityRemoved", "func_72847_b" },
-                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "onEntityAdded", "func_72923_a" },
-                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer",
+                        "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/World" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { { "loadedChunks", "field_73244_f" }, entityField, unloadedField,
+                        { "weatherEffects", "field_73007_j" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/List;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList+unloadedEntityList+weatherEffects");
+        // loadedChunks is the outermost lock everywhere: World.getChunk ->
+        // provideChunk mutates the provider map from inside entity-lock holders,
+        // and pool-thread provider-map holders reach entity lists via
+        // Chunk.onUnload/setChunkDataFromThis. Every entity wrapper takes it
+        // first or the hierarchy inverts (DevChurn deadlock sweep).
+        synchronizeOnFields(cn, new String[] { "addWeatherEffect", "func_72942_c" },
+                "(Lnet/minecraft/entity/Entity;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMap, { "weatherEffects", "field_73007_j" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+weatherEffects");
+        synchronizeOnFields(cn, new String[] { "spawnEntity", "func_72838_d" },
+                "(Lnet/minecraft/entity/Entity;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMap, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        synchronizeOnFields(cn, new String[] { "onEntityRemoved", "func_72847_b" },
+                "(Lnet/minecraft/entity/Entity;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMap, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        synchronizeOnFields(cn, new String[] { "onEntityAdded", "func_72923_a" },
+                "(Lnet/minecraft/entity/Entity;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMap, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        // WorldServer does not override removeEntity: the World wrapper covers it,
+        // and EntityTracker.track/untrack wrappers already serialize the entries Set.
 
         cn.accept(cw);
         LOG.info("Patched WorldServer: env tick per-chunk dispatch + mcmt$tickEnvChunk extraction + scheduled-tick sync");
-        return cw.toByteArray();
+        byte[] out = cw.toByteArray();
+        if (Boolean.getBoolean("mcmt.dump"))
+            dump("net.minecraft.world.WorldServer", out);
+        return out;
+    }
+
+    private void dump(String name, byte[] bytes)
+    {
+        try
+        {
+            java.io.File dir = new java.io.File(System.getProperty("java.io.tmpdir"), "mcmt-dump");
+            dir.mkdirs();
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(
+                    new java.io.File(dir, name.replace('.', '_') + ".class"));
+            fos.write(bytes);
+            fos.close();
+        }
+        catch (Exception ignored)
+        {
+        }
     }
 
     private byte[] patchEntityTracker(byte[] in)
@@ -440,9 +591,16 @@ public class MCMTClassTransformer implements IClassTransformer
         }
         // EntityTracker.tick iterates entries on the main thread while pool-thread
         // entity add/remove reaches track/untrack via WorldServer.onEntity* (CME)
-        synchronizeOnField(cn, new String[] { "tick", "func_72788_a" }, "()V",
-                "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
-                "trackerEntries");
+        // loadedChunks first: EntityTrackerEntry.updatePlayerChunk reaches
+        // getChunk->provideChunk while this holds entries; provider-map holders
+        // must never wait on entries behind entity lists they already passed.
+        synchronizeOnFields(cn, new String[] { "tick", "func_72788_a" }, "()V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer",
+                        "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/entity/EntityTracker" } },
+                new String[][] { { "loadedChunks", "field_73244_f" }, { entriesName } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/Set;" },
+                "loadedChunks+trackerEntries");
         synchronizeOnField(cn, new String[] { "track", "func_72786_a" }, "(Lnet/minecraft/entity/Entity;)V",
                 "net/minecraft/entity/EntityTracker", new String[] { entriesName }, "Ljava/util/Set;",
                 "trackerEntries");
@@ -472,21 +630,74 @@ public class MCMTClassTransformer implements IClassTransformer
         return cw.toByteArray();
     }
 
-    private void synchronizeOnTickList(ClassNode cn, String[] names, String desc)
+    // loadedChunks is a plain Long2ObjectOpenHashMap iterated by
+    // ChunkProviderServer.tick on every pool-thread world tick while pool-thread
+    // chunk loads (entity-tick side effects) and harness-style queueUnload mutate
+    // it -> CME/AIOOBE crashes (found by DevChurn). Serialize map mutations and
+    // the tick's iteration on the map's own monitor. Lock hierarchy: loadedChunks
+    // sits above entity lists (chunk loads reach unloadEntities), so nothing may
+    // take loadedChunks while holding entity locks — updateEntities/getPersistentChunks
+    // do not, verified against bytecode.
+    private byte[] patchChunkProviderServer(byte[] in)
     {
-        synchronizeOnField(cn, names, desc, "net/minecraft/world/WorldServer",
-                new String[] { "pendingTickListEntriesTreeSet", "field_73065_O" }, "Ljava/util/TreeSet;",
-                "pendingTickListEntriesTreeSet");
+        ClassNode cn = new ClassNode();
+        new ClassReader(in).accept(cn, 0);
+        // provideChunk is NOT wrapped: it runs full chunk GENERATION (modded
+        // worldgen, e.g. BetterCaves parallelStream) inside any monitor we take,
+        // and generator threads re-enter provideChunk for neighbor chunks ->
+        // nested parallelStream workers block on the held monitor and deadlock
+        // (prodtest hang jstack 2026-10-12). Map safety is covered by the
+        // tick/saveChunks/loadChunk/queueUnload wrappers; unlocked generation
+        // reads are benign (computeIfAbsent semantics).
+        synchronizeOnField(cn, new String[] { "loadChunk", "func_186028_c" },
+                "(II)Lnet/minecraft/world/chunk/Chunk;", "net/minecraft/world/gen/ChunkProviderServer",
+                new String[] { "loadedChunks", "field_73244_f" },
+                "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "loadedChunks");
+        synchronizeOnField(cn, new String[] { "queueUnload", "func_189549_a" },
+                "(Lnet/minecraft/world/chunk/Chunk;)V", "net/minecraft/world/gen/ChunkProviderServer",
+                new String[] { "loadedChunks", "field_73244_f" },
+                "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "loadedChunks");
+        synchronizeOnField(cn, new String[] { "tick", "func_73156_b" }, "()Z",
+                "net/minecraft/world/gen/ChunkProviderServer",
+                new String[] { "loadedChunks", "field_73244_f" },
+                "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "loadedChunks");
+        synchronizeOnField(cn, new String[] { "saveChunks", "func_186027_a" }, "(Z)Z",
+                "net/minecraft/world/gen/ChunkProviderServer",
+                new String[] { "loadedChunks", "field_73244_f" },
+                "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "loadedChunks");
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2)
+            {
+                try
+                {
+                    return super.getCommonSuperClass(type1, type2);
+                }
+                catch (Exception e)
+                {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        cn.accept(cw);
+        byte[] out = cw.toByteArray();
+        if (Boolean.getBoolean("mcmt.dump"))
+            dump("net.minecraft.world.gen.ChunkProviderServer", out);
+        LOG.info("Patched ChunkProviderServer: loadedChunks synchronization");
+        return out;
     }
 
     private void synchronizeOnField(ClassNode cn, String[] names, String desc, String fieldOwner,
             String[] fieldNames, String fieldType, String logName)
     {
-        synchronizeOnFields(cn, names, desc, new String[] { fieldOwner },
+        synchronizeOnFields(cn, names, desc, new String[][] { { fieldOwner } },
                 new String[][] { fieldNames }, new String[] { fieldType }, logName);
     }
 
-    private void synchronizeOnFields(ClassNode cn, String[] names, String desc, String[] fieldOwners,
+    // fieldOwners[i][j]: declaring owner of candidate name fieldNamesList[i][j].
+    // fieldOwners[i].length must equal fieldNamesList[i].length.
+    private void synchronizeOnFields(ClassNode cn, String[] names, String desc, String[][] fieldOwners,
             String[][] fieldNamesList, String[] fieldTypes, String logName)
     {
         MethodNode m = null;
@@ -511,28 +722,57 @@ public class MCMTClassTransformer implements IClassTransformer
             return;
         }
         String[] resolved = new String[fieldNamesList.length];
+        String[] owners = new String[fieldNamesList.length];
         for (int i = 0; i < fieldNamesList.length; i++)
         {
             String[] fieldNames = fieldNamesList[i];
+            String[] fieldOwner = fieldOwners[i];
             String fieldName = null;
+            String fieldOwn = null;
+            // 1) declared in this class or any superclass: exact name + descriptor
+            //    match, walking the real hierarchy so inherited/private fields get
+            //    the declaring owner (asserted call-site owners are advisory only)
+            boolean declaredWrongType = false;
             for (FieldNode fn : cn.fields)
             {
-                for (String f : fieldNames)
+                for (int j = 0; j < fieldNames.length; j++)
                 {
-                    if (fn.name.equals(f))
+                    if (fn.name.equals(fieldNames[j]))
                     {
+                        if (!fn.desc.equals(fieldTypes[i]))
+                        {
+                            declaredWrongType = true;
+                            break;
+                        }
                         fieldName = fn.name;
+                        fieldOwn = cn.name;
                         break;
                     }
                 }
-                if (fieldName != null)
+                if (fieldName != null || declaredWrongType)
                     break;
+            }
+            if (fieldName == null && !declaredWrongType)
+            {
+                // private/unmapped field (e.g. EntityTracker.entries): candidates are
+                // not SRG/MCP names, resolve by unique descriptor match here
+                for (FieldNode fn : cn.fields)
+                    if (fn.desc.equals(fieldTypes[i]))
+                    {
+                        if (fieldName != null)
+                        {
+                            fieldName = null; // ambiguous: two same-typed fields
+                            break;
+                        }
+                        fieldName = fn.name;
+                        fieldOwn = cn.name;
+                    }
             }
             if (fieldName == null)
             {
-                // inherited field (declared on a superclass we do not see here):
-                // pick the candidate matching this class's naming mode (func_/field_
-                // prefixes appear together with SRG names, plain names with MCP)
+                // not declared here: inherited (or foreign). Pick the candidate
+                // matching this class's naming mode, then ask the runtime class
+                // hierarchy which class actually declares it.
                 boolean srg = false;
                 for (MethodNode mn : cn.methods)
                 {
@@ -542,12 +782,24 @@ public class MCMTClassTransformer implements IClassTransformer
                         break;
                     }
                 }
-                for (String f : fieldNames)
-                    if (f.startsWith("field_") == srg)
+                int matchIdx = -1;
+                for (int j = 0; j < fieldNames.length; j++)
+                    if (fieldNames[j].startsWith("field_") == srg)
                     {
-                        fieldName = f;
+                        fieldName = fieldNames[j];
+                        matchIdx = j;
                         break;
                     }
+                if (fieldName != null)
+                {
+                    // reflection cannot see real field names in dev (the MC jar
+                    // on the dev classpath is still obfuscated; deobf happens at
+                    // class-load time), so trust the asserted owner: wrappers on
+                    // subclasses of the declaring class emit a correct GETFIELD,
+                    // and cross-hierarchy loadedChunks goes through emitMonitor's
+                    // accessor regardless of the asserted owner.
+                    fieldOwn = fieldOwner[Math.max(0, Math.min(matchIdx, fieldOwner.length - 1))];
+                }
             }
             if (fieldName == null)
             {
@@ -555,7 +807,9 @@ public class MCMTClassTransformer implements IClassTransformer
                 return;
             }
             resolved[i] = fieldName;
+            owners[i] = fieldOwn;
         }
+
         // Rename the original and emit a wrapper that runs it inside
         // synchronized(f1), synchronized(f2), ... in order. The wrapper uses
         // no new locals so the frame layout of the exception handler stays
@@ -570,11 +824,7 @@ public class MCMTClassTransformer implements IClassTransformer
         LabelNode handler = new LabelNode();
         b.add(start);
         for (int i = 0; i < resolved.length; i++)
-        {
-            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
-            b.add(new InsnNode(Opcodes.MONITORENTER));
-        }
+            emitMonitor(b, owners[i], resolved[i], fieldTypes[i], true);
         b.add(new VarInsnNode(Opcodes.ALOAD, 0));
         b.add(new LdcInsnNode(wrapperName + " enter"));
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
@@ -595,23 +845,34 @@ public class MCMTClassTransformer implements IClassTransformer
         b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "debugTickSize",
                 "(Ljava/lang/Object;Ljava/lang/String;)V", false));
         for (int i = resolved.length - 1; i >= 0; i--)
-        {
-            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
-            b.add(new InsnNode(Opcodes.MONITOREXIT));
-        }
+            emitMonitor(b, owners[i], resolved[i], fieldTypes[i], false);
         b.add(new InsnNode(Type.getReturnType(desc).getOpcode(Opcodes.IRETURN)));
         b.add(handler);
         for (int i = resolved.length - 1; i >= 0; i--)
-        {
-            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            b.add(new FieldInsnNode(Opcodes.GETFIELD, fieldOwners[i], resolved[i], fieldTypes[i]));
-            b.add(new InsnNode(Opcodes.MONITOREXIT));
-        }
+            emitMonitor(b, owners[i], resolved[i], fieldTypes[i], false);
         b.add(new InsnNode(Opcodes.ATHROW));
         w.tryCatchBlocks.add(new TryCatchBlockNode(start, handler, handler, null));
         cn.methods.add(w);
         LOG.info("Synchronized " + w.name + " on " + logName);
+    }
+
+    // Emit the monitor acquisition for one wrapper lock. loadedChunks lives on
+    // ChunkProviderServer, unreachable by GETFIELD from World/WorldServer/
+    // EntityTracker wrappers, so it routes through the hook accessor instead.
+    private void emitMonitor(InsnList b, String owner, String name, String desc, boolean enter)
+    {
+        if ("loadedChunks".equals(name) || "field_73244_f".equals(name))
+        {
+            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            b.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "getLoadedChunks",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+        }
+        else
+        {
+            b.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            b.add(new FieldInsnNode(Opcodes.GETFIELD, owner, name, desc));
+        }
+        b.add(new InsnNode(enter ? Opcodes.MONITORENTER : Opcodes.MONITOREXIT));
     }
 
     private byte[] patchWorld(byte[] in)
@@ -696,36 +957,71 @@ public class MCMTClassTransformer implements IClassTransformer
 
         // entity list mutation sites: pool-thread spawn/remove must not race
         // main-thread iteration of loadedEntityList (foamfix CME crash)
+        // Same hierarchy as WorldServer: loadedChunks first (World.getChunk ->
+        // provideChunk is reachable from inside every one of these while holding
+        // the entity list lock). Wrappers are reentrant-safe when WorldServer's
+        // wrapper already holds loadedChunks higher in the stack.
         String[] entityField = { "loadedEntityList", "field_72996_f" };
-        synchronizeOnField(cn, new String[] { "spawnEntity", "func_72838_d" },
-                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "removeEntity", "func_72900_e" },
-                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "onEntityRemoved", "func_72847_b" },
-                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "removeEntityDangerously", "func_72973_f" },
-                "(Lnet/minecraft/entity/Entity;)V", "net/minecraft/world/World", entityField, "Ljava/util/List;",
-                "loadedEntityList");
-        synchronizeOnField(cn, new String[] { "unloadEntities", "func_175681_c" },
-                "(Ljava/util/Collection;)V", "net/minecraft/world/World",
-                new String[] { "unloadedEntityList", "field_72997_g" }, "Ljava/util/List;",
-                "unloadedEntityList");
+        String[] chunkMapW = { "loadedChunks", "field_73244_f" };
+        synchronizeOnFields(cn, new String[] { "spawnEntity", "func_72838_d" },
+                "(Lnet/minecraft/entity/Entity;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        // removeEntity is not overridden by WorldServer: the World wrapper already
+        // covers it (INVOKESPECIAL delegates to the World original), so no wrapper here.
+        // countEntities iterates loadedEntityList (WorldEntitySpawner calls it on
+        // pool threads via WorldServer.tick) — read-side iteration of the same
+        // list concurrent spawn/remove mutates needs the monitor too.
+        synchronizeOnFields(cn, new String[] { "countEntities", "func_72907_a" },
+                "(Ljava/lang/Class;)I",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        synchronizeOnFields(cn, new String[] { "onEntityRemoved", "func_72847_b" },
+                "(Lnet/minecraft/entity/Entity;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        synchronizeOnFields(cn, new String[] { "removeEntityDangerously", "func_72973_f" },
+                "(Lnet/minecraft/entity/Entity;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        synchronizeOnFields(cn, new String[] { "unloadEntities", "func_175681_c" },
+                "(Ljava/util/Collection;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, { "unloadedEntityList", "field_72997_g" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+unloadedEntityList");
         // weatherEffects is iterated in updateEntities and added to by lightning
         // /weather entities spawned from entity ticks
-        synchronizeOnField(cn, new String[] { "addWeatherEffect", "func_72942_c" },
-                "(Lnet/minecraft/entity/Entity;)Z", "net/minecraft/world/World",
-                new String[] { "weatherEffects", "field_73007_j" }, "Ljava/util/List;",
-                "weatherEffects");
+        synchronizeOnFields(cn, new String[] { "addWeatherEffect", "func_72942_c" },
+                "(Lnet/minecraft/entity/Entity;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, { "weatherEffects", "field_73007_j" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+weatherEffects");
 
         // COMPUTE_FRAMES: the loadedEntityList sync wrappers add try/catch
         // handler entries that need stackmap frames (COMPUTE_MAXS leaves them
         // missing -> VerifyError "Expecting a stackmap frame at branch target")
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
         cn.accept(cw);
-        return cw.toByteArray();
+        byte[] out = cw.toByteArray();
+        if (Boolean.getBoolean("mcmt.dump"))
+            dump("net.minecraft.world.World", out);
+        return out;
     }
 
     private byte[] patchMinecraftServer(byte[] in)
@@ -780,6 +1076,50 @@ public class MCMTClassTransformer implements IClassTransformer
             LOG.error("WorldServer.tick call site not found in updateTimeLightAndEntities");
         else
             LOG.info("Patched MinecraftServer: preTick + " + n + " world tick dispatch site(s)");
+
+        // Dev-only churn harness entry: run() is un-mapped in both dev and prod,
+        // boot() no-ops unless -Dmcmt.devchurn=true.
+        MethodNode run = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.desc.equals("()V") && mn.name.equals("run"))
+            {
+                run = mn;
+                break;
+            }
+        }
+        if (run != null)
+        {
+            InsnList boot = new InsnList();
+            boot.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            boot.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                    "org/jmt/mcmt/coremod/DevChurn", "boot",
+                    "(Lnet/minecraft/server/MinecraftServer;)V", false));
+            run.instructions.insert(boot);
+            LOG.info("Patched MinecraftServer: churn harness entry");
+        }
+
+        // Shutdown quiescence: await in-flight pool tick tasks before the server
+        // tears worlds down (unloadWorlds races loadedChunkMap otherwise).
+        MethodNode stop = null;
+        for (MethodNode mn : cn.methods)
+        {
+            if (mn.desc.equals("()V")
+                    && (mn.name.equals("stopServer") || mn.name.equals("func_71260_j")))
+            {
+                stop = mn;
+                break;
+            }
+        }
+        if (stop != null)
+        {
+            InsnList q = new InsnList();
+            q.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOK, "quiesce", "()V", false));
+            stop.instructions.insert(q);
+            LOG.info("Patched MinecraftServer: shutdown quiescence");
+        }
+        else
+            LOG.error("stopServer not found in MinecraftServer, shutdown quiescence missing");
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cn.accept(cw);
         return cw.toByteArray();

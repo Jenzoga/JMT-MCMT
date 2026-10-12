@@ -34,6 +34,18 @@ runServer {
     systemProperty 'fml.coreMods.load', 'org.jmt.mcmt.coremod.MCMTLoadingPlugin'
     // Dev jars are unsigned; FMLSanityChecker would otherwise refuse to boot.
     systemProperty 'fml.ignoreInvalidMinecraftCertificates', 'true'
+    // -Dmcmt.devchurn=true enables the DevChurn race harness (see coremod/AGENTS.md);
+    // -Dmcmt.debug=true enables tick-list size warnings. Both default off in the forked server JVM.
+    // systemProperty (not jvmArgs): FG's own argument list overwrites jvmArgs.
+    for (String p : ['mcmt.devchurn', 'mcmt.debug', 'mcmt.dump', 'mcmt.churn.iterations', 'mcmt.churn.maxmillis',
+                     'mcmt.churn.parallelEntities', 'mcmt.churn.parallelTE', 'mcmt.churn.parallelEnv']) {
+        // -P sets project properties; -D sets system properties — accept both.
+        String v = (String) project.findProperty(p)
+        if (v == null)
+            v = System.getProperty(p)
+        if (v != null)
+            systemProperty p, v
+    }
 }
 
 jar {
