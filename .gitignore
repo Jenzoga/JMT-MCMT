@@ -84,3 +84,5 @@ logs/*
 #############
 /.codegraph
 *.log
+
+.DS_Store
