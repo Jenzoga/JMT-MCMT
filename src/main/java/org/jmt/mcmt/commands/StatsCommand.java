@@ -11,51 +11,51 @@ import org.jmt.mcmt.config.GeneralConfig;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.Commands;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.text.StringTextComponent;
+import net.minecraft.network.chat.Component;
 
 public class StatsCommand {
 
-	public static LiteralArgumentBuilder<CommandSource> registerStatus(LiteralArgumentBuilder<CommandSource> root) {
+	public static LiteralArgumentBuilder<CommandSourceStack> registerStatus(LiteralArgumentBuilder<CommandSourceStack> root) {
 		return root.then(Commands.literal("stats").then(Commands.literal("reset").executes(cmdCtx -> {
 			resetAll();
 			return 1;
 		})).executes(cmdCtx -> {
 			if (!threadStats) {
-				StringTextComponent message = new StringTextComponent("Stat calcs are disabled so stats are out of date"); 
-				cmdCtx.getSource().sendFeedback(message, true);
+				Component message = Component.literal("Stat calcs are disabled so stats are out of date"); 
+				cmdCtx.getSource().sendSuccess(() -> message, true);
 			}
 			StringBuilder messageString = new StringBuilder(
 					"Current max threads " + mean(maxThreads, liveValues) + " (");
-			messageString.append("World:" + mean(maxWorlds, liveValues));
+			messageString.append("Level:" + mean(maxWorlds, liveValues));
 			messageString.append(" Entity:" + mean(maxEntities, liveValues));
 			messageString.append(" TE:" + mean(maxTEs, liveValues));
 			messageString.append(" Env:" + mean(maxEnvs, liveValues) + ")");
-			StringTextComponent message = new StringTextComponent(messageString.toString());
-			cmdCtx.getSource().sendFeedback(message, true);
+			Component message = Component.literal(messageString.toString());
+			cmdCtx.getSource().sendSuccess(() -> message, true);
 			return 1;
 		}).then(Commands.literal("toggle").requires(cmdSrc -> {
-			return cmdSrc.hasPermissionLevel(2);
+			return cmdSrc.hasPermission(2);
 		}).executes(cmdCtx -> {
 			threadStats = !threadStats;
-			StringTextComponent message = new StringTextComponent("Stat calcs are " + 
+			Component message = Component.literal("Stat calcs are " + 
 					(!threadStats ? "disabled" : "enabled") + "!");
-			cmdCtx.getSource().sendFeedback(message, true);
+			cmdCtx.getSource().sendSuccess(() -> message, true);
 			return 1;
 		})).then(Commands.literal("startlog").requires(cmdSrc -> {
-			return cmdSrc.hasPermissionLevel(2);
+			return cmdSrc.hasPermission(2);
 		}).executes(cmdCtx -> {
 			doLogging = true;
-			StringTextComponent message = new StringTextComponent("Logging started!");
-			cmdCtx.getSource().sendFeedback(message, true);
+			Component message = Component.literal("Logging started!");
+			cmdCtx.getSource().sendSuccess(() -> message, true);
 			return 1;
 		})).then(Commands.literal("stoplog").requires(cmdSrc -> {
-			return cmdSrc.hasPermissionLevel(2);
+			return cmdSrc.hasPermission(2);
 		}).executes(cmdCtx -> {
-			StringTextComponent message = new StringTextComponent("Logging stopping...");
-			cmdCtx.getSource().sendFeedback(message, true);
+			Component message = Component.literal("Logging stopping...");
+			cmdCtx.getSource().sendSuccess(() -> message, true);
 			doLogging = false;
 			return 1;
 		})));
@@ -161,7 +161,7 @@ public class StatsCommand {
 							maxThreads[currentPos] = Math.max(maxThreads[currentPos], total);
 									
 						}
-						if (mcs != null && !mcs.isServerRunning()) {
+						if (mcs != null && !mcs.isRunning()) {
 							doLogging = false;
 						}
 						if (doLogging) {
@@ -171,8 +171,8 @@ public class StatsCommand {
 							}
 							if (currentSteps % stepsPer == 0) {
 								float ticktime = -1;
-								if (mcs != null && mcs.isServerRunning()) {
-									ticktime = mcs.getTickTime();
+								if (mcs != null && mcs.isRunning()) {
+									ticktime = mcs.getAverageTickTime();
 								}
 								float threadCount = mean(maxThreads, liveValues);
 								long memory = Runtime.getRuntime().maxMemory() - Runtime.getRuntime().freeMemory();

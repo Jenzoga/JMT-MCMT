@@ -16,6 +16,7 @@ import net.minecraftforge.common.ForgeConfigSpec.IntValue;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.config.ModConfigEvent;
 
 /**
  * 
@@ -45,7 +46,7 @@ public class GeneralConfig {
 	public static int paraMax;
 	public static ParaMaxMode paraMaxMode;
 
-	// World
+	// Level
 	public static boolean disableWorld;
 	public static boolean disableWorldPostTick;
 	
@@ -123,7 +124,7 @@ public class GeneralConfig {
 	//////////////////////////
 
 	@SubscribeEvent
-	public static void onModConfigEvent(final ModConfig.ModConfigEvent configEvent) {
+	public static void onModConfigEvent(final net.minecraftforge.fml.event.config.ModConfigEvent configEvent) {
 		if (configEvent.getConfig().getSpec() == GeneralConfig.GENERAL_SPEC) {
 			bakeConfig();
 		}

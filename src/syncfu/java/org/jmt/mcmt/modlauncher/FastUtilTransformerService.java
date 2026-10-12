@@ -273,7 +273,7 @@ public class FastUtilTransformerService  implements ITransformer<ClassNode>, ITr
 	}
 
 	@Override
-	public void beginScanning(IEnvironment environment) {
+	public List<ITransformationService.Resource> beginScanning(IEnvironment environment) {
 		System.out.println("HAI1");
 		/*
 		try {
@@ -291,7 +291,7 @@ public class FastUtilTransformerService  implements ITransformer<ClassNode>, ITr
 			URL jar = src.getLocation();
 			if (!jar.toString().endsWith(".jar")) {
 				LOGGER.warn(M_LOCATOR, "This be dev!!!");
-				return;
+				return Collections.emptyList();
 			}
 			URI uri = new URI("jar:".concat(jar.toString()).concat("!/"));
 			//Thanks SO https://stackoverflow.com/a/48298758
@@ -318,6 +318,7 @@ public class FastUtilTransformerService  implements ITransformer<ClassNode>, ITr
 		catch (Exception e) {
 			e.printStackTrace();
 		}
+		return Collections.emptyList();
 	}
 
 	@Override

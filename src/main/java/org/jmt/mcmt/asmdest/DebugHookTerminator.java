@@ -1,6 +1,5 @@
 package org.jmt.mcmt.asmdest;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -8,7 +7,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.BooleanSupplier;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -16,41 +14,35 @@ import org.jmt.mcmt.config.GeneralConfig;
 
 import com.mojang.datafixers.util.Either;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.nbt.CompoundNBT;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.registry.MutableRegistry;
-import net.minecraft.util.registry.Registry;
-import net.minecraft.world.biome.Biome;
-import net.minecraft.world.biome.BiomeContainer;
-import net.minecraft.world.biome.provider.BiomeProvider;
-import net.minecraft.world.biome.provider.SingleBiomeProvider;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkPrimer;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.IChunk;
-import net.minecraft.world.chunk.storage.ChunkSerializer;
-import net.minecraft.world.server.ChunkHolder;
-import net.minecraft.world.server.ChunkHolder.IChunkLoadingError;
-import net.minecraft.world.server.ServerChunkProvider;
-
-/* 1.15.2 code; AKA the only thing that changed  
-import net.minecraft.world.biome.provider.SingleBiomeProviderSettings;
-/* */
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.EmptyLevelChunk;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import net.minecraft.server.level.ChunkHolder;
+import net.minecraft.server.level.ServerChunkCache;
+import net.minecraft.server.level.ServerLevel;
 
 // TODO Should be renamed ChunkRepairHookTerminator (Note requres coremod edit)
 /**
  * Handles chunk forcing in scenarios where world corruption has occured
- * 
+ *
  * @author jediminer543
  *
  */
 public class DebugHookTerminator {
-	
+
 	private static final Logger LOGGER = LogManager.getLogger();
-	
+
 	private static boolean bypassLoadTarget = false;
-	
+
 	public static class BrokenChunkLocator {
 		long chunkPos;
 		CompletableFuture<?> maincf;
@@ -64,36 +56,29 @@ public class DebugHookTerminator {
 		public long getChunkPos() {
 			return chunkPos;
 		}
-		
+
 	}
-	
+
 	public static List<BrokenChunkLocator> breaks = new ArrayList<>();
-	
+
 	public static boolean isBypassLoadTarget() {
 		return bypassLoadTarget;
 	}
-	
+
 	public static AtomicBoolean mainThreadChunkLoad = new AtomicBoolean();
 	public static AtomicLong mainThreadChunkLoadCount = new AtomicLong();
 	public static String mainThread = "Server thread";
-		
-	public static void chunkLoadDrive(ServerChunkProvider.ChunkExecutor executor, BooleanSupplier isDone, ServerChunkProvider scp, 
-			CompletableFuture<Either<IChunk, IChunkLoadingError>> completableFuture, long chunkpos) {
-		/*
-		if (!GeneralConfig.enableChunkTimeout) {
-			bypassLoadTarget = false;
-			executor.driveUntil(isDone);
-			return;
-		}
-		*/
+
+	public static void chunkLoadDrive(ServerChunkCache scp, CompletableFuture<Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>> completableFuture, int chunkX, int chunkZ) {
+		long chunkpos = ChunkPos.asLong(chunkX, chunkZ);
 		int failcount = 0;
 		if (Thread.currentThread().getName().equals(mainThread)) {
 			mainThreadChunkLoadCount.set(0);
 			mainThreadChunkLoad.set(true);
 		}
-		while (!isDone.getAsBoolean()) {
-			if (!executor.driveOne()) {
-				if(isDone.getAsBoolean()) {
+		while (!completableFuture.isDone()) {
+			if (!scp.pollTask()) {
+				if (completableFuture.isDone()) {
 					if (Thread.currentThread().getName().equals(mainThread)) {
 						mainThreadChunkLoad.set(false);
 					}
@@ -105,74 +90,57 @@ public class DebugHookTerminator {
 						mainThreadChunkLoadCount.incrementAndGet();
 					}
 					Thread.yield();
-					LockSupport.parkNanos("THE END IS ~~NEVER~~ LOADING", 100000L);
+					LockSupport.parkNanos(100000L);
 				} else {
-					LOGGER.error("", new TimeoutException("Error fetching chunk " + chunkpos));	
+					LOGGER.error("", new TimeoutException("Error fetching chunk " + chunkpos));
 					bypassLoadTarget = true;
 					if (GeneralConfig.enableTimeoutRegen || GeneralConfig.enableBlankReturn) {
-						
-						// TODO build a 1.15 version of this
+						ServerLevel level = (ServerLevel) scp.getLevel();
 						if (GeneralConfig.enableBlankReturn) {
-							/* 1.16.1 code; AKA the only thing that changed  */
 							// Generate a new empty chunk
-							MutableRegistry<Biome> biomeRegistry = scp.world.func_241828_r().func_243612_b(Registry.BIOME_KEY);
-							BiomeProvider bp = new SingleBiomeProvider(biomeRegistry.getByValue(0));
-							Chunk out = new Chunk(scp.world, new ChunkPos(chunkpos), 
-									new BiomeContainer(biomeRegistry, new ChunkPos(chunkpos), bp));
+							EmptyLevelChunk out = new EmptyLevelChunk(level, new ChunkPos(chunkX, chunkZ),
+									level.registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS));
 							// SCIENCE
-							completableFuture.complete(Either.left(out));
-							/* */
-							/* 1.15.2 code; AKA the only thing that changed  
-							// Generate a new empty chunk
-							// Null is legal here as it's literally not used
-							SingleBiomeProviderSettings sbps = new SingleBiomeProviderSettings(null);
-							sbps.setBiome(Registry.BIOME.getOrDefault(null));
-							BiomeProvider bp = new SingleBiomeProvider(sbps);
-							Chunk out = new Chunk(scp.world, new ChunkPos(chunkpos), 
-									new BiomeContainer(new ChunkPos(chunkpos), bp));
-							// SCIENCE
-							completableFuture.complete(Either.left(out));
-							/* */
+							completableFuture.complete(Either.left((ChunkAccess)out));
 						} else {
 							try {
-								CompoundNBT cnbt = scp.chunkManager.readChunk(new ChunkPos(chunkpos));
+								CompoundTag cnbt = scp.chunkMap.readChunk(new ChunkPos(chunkX, chunkZ)).join().orElse(null);
 								if (cnbt != null) {
-									ChunkPrimer cp = ChunkSerializer.read(scp.world, scp.chunkManager.templateManager, scp.chunkManager.pointOfInterestManager, new ChunkPos(chunkpos), cnbt);
-									completableFuture.complete(Either.left(new Chunk(scp.getWorld(), cp)));
+									ProtoChunk cp = ChunkSerializer.read(level, level.getPoiManager(), new ChunkPos(chunkX, chunkZ), cnbt);
+									completableFuture.complete(Either.left((ChunkAccess)new LevelChunk(level, cp, null)));
+								} else {
+									completableFuture.complete(ChunkHolder.UNLOADED_CHUNK);;
 								}
-							} catch (IOException e) {
+							} catch (Exception e) {
 								e.printStackTrace();
+								completableFuture.complete(ChunkHolder.UNLOADED_CHUNK);;
 							}
-							completableFuture.complete(ChunkHolder.MISSING_CHUNK);
 						}
 					} else {
 						System.err.println(completableFuture.toString());
-						ChunkHolder chunkholder = scp.func_217213_a(chunkpos);
+						ChunkHolder chunkholder = scp.getVisibleChunkIfPresent(chunkpos);
 						CompletableFuture<?> firstBroke = null;
-						for (ChunkStatus cs : ChunkStatus.getAll()) {
-							CompletableFuture<Either<IChunk, IChunkLoadingError>> cf = chunkholder.func_219301_a(cs);
-							if (cf == ChunkHolder.MISSING_CHUNK_FUTURE) {
-								System.out.println("Status: " + cs.toString() + " is not yet loaded");
-							} else {
-								System.out.println("Status: " + cs.toString() + " is " + cf.toString());
-								if (firstBroke == null && !cf.toString().contains("Completed normally")) {
-									firstBroke = cf;
+						if (chunkholder != null) {
+							for (ChunkStatus cs : ChunkStatus.getStatusList()) {
+								CompletableFuture<Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>> cf = chunkholder.getFutureIfPresentUnchecked(cs);
+								if (cf == ChunkHolder.UNLOADED_CHUNK_FUTURE) {
+									System.out.println("Status: " + cs.toString() + " is not yet loaded");
+								} else {
+									System.out.println("Status: " + cs.toString() + " is " + cf.toString());
+									if (firstBroke == null && !cf.toString().contains("Completed normally")) {
+										firstBroke = cf;
+									}
 								}
 							}
 						}
 						breaks.add(new BrokenChunkLocator(chunkpos, completableFuture, firstBroke));
-						completableFuture.complete(Either.right(new IChunkLoadingError() {
-							@Override
-							public String toString() {
-								return "TIMEOUT";
-							}
-						}));
+						completableFuture.complete(ChunkHolder.UNLOADED_CHUNK);;
 					}
 				}
 			}
 		}
 	}
-	
+
 	public static void checkNull(Object o) {
 		if (o == null) {
 			System.out.println("Null warning:");

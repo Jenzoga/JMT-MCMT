@@ -7,7 +7,7 @@
 
 # MCMT - Minecraft Multi-Threading Mod
 
-This is a mod for Minecraft (forge) versions 1.15.2 and 1.16.x that enables multithreading
+This is a mod for Minecraft (forge) versions 1.15.2, 1.16.x, and 1.20.1 that enables multithreading
 
 Currently it supports multithreading worlds, entities, tile entities, and environment ticks; 
 under testing it has appeared to work with mods.
@@ -28,7 +28,7 @@ TO MODDERS: This mod logs at warn level to the log saying it is installed every 
 
 Simply install the jar like you normally would any other mod; it's that simple. 
 
-There are different jars for 1.15.2 and 1.16.1 as while exactly 1 method thing changed to break transferability, there is no way for me to deal with it in a single jar. So make sure you get the right one.
+There are different jars for 1.15.2, 1.16.1, and 1.20.1 as the internal class layout changed enough between versions to break transferability, and there is no way for me to deal with it in a single jar. So make sure you get the right one.
 
 ## Getting involved
 

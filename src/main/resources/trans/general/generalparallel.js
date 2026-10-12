@@ -1,37 +1,32 @@
 function synchronizeMethod(debugLine) {
 	return function(methodNode) {
 		var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-		
+
 		asmapi.log("INFO", "[JMTSUPERTRANS] " + debugLine + " Transformer Called");
-		
+
 		var opcodes = Java.type('org.objectweb.asm.Opcodes');
-		
+
 		methodNode.access += opcodes.ACC_SYNCHRONIZED;
-		
+
 		asmapi.log("INFO", "[JMTSUPERTRANS] " + debugLine + " Transformer Complete");
-		
+
 		return methodNode;
 	}
-}
-
-function printInsnNode(printTgt) {
-	print(printTgt+"|"+printTgt.opcode
-			+"|"+printTgt.desc+"|"+printTgt.owner+"|"+printTgt.name+"|"+printTgt["var"])
 }
 
 function toParallelHashSets(methodNode) {
 	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
 	var MethodType = asmapi.MethodType;
 	var instructions = methodNode.instructions;
-		
+
 	var callMethod = "newHashSet";
 	var callClass = "com/google/common/collect/Sets";
 	var callDesc = "()Ljava/util/HashSet;";
-	
+
 	var tgtMethod = "newHashSet";
 	var tgtClass = "org/jmt/mcmt/asmdest/ConcurrentCollections";
 	var tgtDesc = "()Ljava/util/Set;";
-	
+
 	var invoke = asmapi.findFirstMethodCallAfter(methodNode, MethodType.STATIC, callClass, callMethod, callDesc, 0);
 	if (invoke != null) {
 		do {
@@ -39,7 +34,7 @@ function toParallelHashSets(methodNode) {
 			invoke.owner = tgtClass;
 			invoke.name = tgtMethod;
 			invoke.desc = tgtDesc;
-		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode, 
+		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode,
 				MethodType.STATIC, callClass, callMethod, callDesc, instructions.indexOf(invoke))) != null)
 	}
 }
@@ -48,15 +43,15 @@ function toParallelHashMaps(methodNode) {
 	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
 	var MethodType = asmapi.MethodType;
 	var instructions = methodNode.instructions;
-	
+
 	var callMethod = "newHashMap";
 	var callClass = "com/google/common/collect/Maps";
 	var callDesc = "()Ljava/util/HashMap;";
-	
+
 	var tgtMethod = "newHashMap";
 	var tgtClass = "org/jmt/mcmt/asmdest/ConcurrentCollections";
 	var tgtDesc = "()Ljava/util/Map;";
-	
+
 	var invoke = asmapi.findFirstMethodCallAfter(methodNode, MethodType.STATIC, callClass, callMethod, callDesc, 0);
 	if (invoke != null) {
 		do {
@@ -64,7 +59,7 @@ function toParallelHashMaps(methodNode) {
 			invoke.owner = tgtClass;
 			invoke.name = tgtMethod;
 			invoke.desc = tgtDesc;
-		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode, 
+		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode,
 				MethodType.STATIC, callClass, callMethod, callDesc, instructions.indexOf(invoke))) != null)
 	}
 }
@@ -73,24 +68,23 @@ function toParallelDeque(methodNode) {
 	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
 	var MethodType = asmapi.MethodType;
 	var instructions = methodNode.instructions;
-	
-	//com/google/common/collect/Queues.newArrayDeque()Ljava/util/ArrayDeque;
+
 	var callMethod = "newArrayDeque";
 	var callClass = "com/google/common/collect/Queues";
 	var callDesc = "()Ljava/util/ArrayDeque;";
-	
+
 	var tgtMethod = "newArrayDeque";
 	var tgtClass = "org/jmt/mcmt/asmdest/ConcurrentCollections";
 	var tgtDesc = "()Ljava/util/Queue;";
-	
+
 	var invoke = asmapi.findFirstMethodCallAfter(methodNode, MethodType.STATIC, callClass, callMethod, callDesc, 0);
 	if (invoke != null) {
 		do {
-			asmapi.log("INFO", "[JMTSUPERTRANS] toParallelHashSets Transforming");
+			asmapi.log("INFO", "[JMTSUPERTRANS] toParallelDeque Transforming");
 			invoke.owner = tgtClass;
 			invoke.name = tgtMethod;
 			invoke.desc = tgtDesc;
-		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode, 
+		} while ((invoke = asmapi.findFirstMethodCallAfter(methodNode,
 				MethodType.STATIC, callClass, callMethod, callDesc, instructions.indexOf(invoke))) != null)
 	}
 }
@@ -98,432 +92,200 @@ function toParallelDeque(methodNode) {
 
 function initializeCoreMod() {
     return {
+    	// ServerChunkCache.tick(BooleanSupplier, boolean)
     	'serverChunkProviderTick': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerChunkProvider',
-                "methodName": "func_217207_a",
-        		"methodDesc": "()V"
+                'class': 'net.minecraft.server.level.ServerChunkCache',
+                "methodName": "tick",
+        		"methodDesc": "(Ljava/util/function/BooleanSupplier;Z)V"
             },
             "transformer": synchronizeMethod("SCPTick")
     	},
-    	/*
-    	'LevelBasedGraphProcessUpdates': {
+    	// LevelTicks replaces ServerTickList in 1.17+
+    	'LevelTicksTick': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.lighting.LevelBasedGraph',
-                "methodName": "func_215483_b",
-        		"methodDesc": "(I)I"
+                'class': 'net.minecraft.world.ticks.LevelTicks',
+                "methodName": "tick",
+        		"methodDesc": "(JILjava/util/function/BiConsumer;)V"
             },
-            "transformer": synchronizeMethod("LevelBasedGraphProcessUpdates")
+            "transformer": synchronizeMethod("LevelTicksTick")
     	},
-    	*/
-    	'ServerTickListTick': {
+    	'LevelTicksSchedule': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerTickList',
-                "methodName": "func_205365_a",
-        		"methodDesc": "()V"
+                'class': 'net.minecraft.world.ticks.LevelTicks',
+                "methodName": "schedule",
+        		"methodDesc": "(Lnet/minecraft/world/ticks/ScheduledTick;)V"
             },
-            "transformer": synchronizeMethod("ServerTickListTick")
+            "transformer": synchronizeMethod("LevelTicksSchedule")
     	},
-    	'ServerTickListAddEntry': {
+    	'LevelTicksAddContainer': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerTickList',
-                "methodName": "func_219504_a",
-        		"methodDesc": "(Lnet/minecraft/world/NextTickListEntry;)V"
+                'class': 'net.minecraft.world.ticks.LevelTicks',
+                "methodName": "addContainer",
+        		"methodDesc": "(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/world/ticks/LevelChunkTicks;)V"
             },
-            "transformer": synchronizeMethod("ServerTickListAddEntry")
+            "transformer": synchronizeMethod("LevelTicksAddContainer")
     	},
-    	'ServerTickListGetPending': {
+    	'LevelTicksRemoveContainer': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerTickList',
-                "methodName": "func_223187_a",
-        		"methodDesc": "(Ljava/util/List;Ljava/util/Collection;Lnet/minecraft/util/math/MutableBoundingBox;Z)Ljava/util/List;"
+                'class': 'net.minecraft.world.ticks.LevelTicks',
+                "methodName": "removeContainer",
+        		"methodDesc": "(Lnet/minecraft/world/level/ChunkPos;)V"
             },
-            "transformer": synchronizeMethod("ServerTickListGetPending")
+            "transformer": synchronizeMethod("LevelTicksRemoveContainer")
     	},
-    	'ServerWorldCollections': {
-            'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                "methodName": "<init>",
-        		"methodDesc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveHandler;Lnet/minecraft/world/storage/WorldInfo;Lnet/minecraft/world/dimension/DimensionType;Lnet/minecraft/profiler/IProfiler;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;)V"
-            },
-            "transformer": function(methodNode) {
-            	print("[JMTSUPERTRANS] ServerWorldCollections Transformer Called");
-            	
-            	toParallelHashSets(methodNode);
-				toParallelDeque(methodNode);
-            	
-            	print("[JMTSUPERTRANS] ServerWorldCollections Transformer Complete");
-            	
-            	return methodNode;
-            }
-    	},
-    	'ServerWorldCollections116': {
-            'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                "methodName": "<init>",
-        		"methodDesc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V"
-            },
-            "transformer": function(methodNode) {
-            	print("[JMTSUPERTRANS] ServerWorldCollections116 Transformer Called");
-            	
-            	toParallelHashSets(methodNode);
-				toParallelDeque(methodNode);
-            	
-            	print("[JMTSUPERTRANS] ServerWorldCollections116 Transformer Complete");
-            	
-            	return methodNode;
-            }
-    	},
-    	'ServerWorldCollections1162': {
-            'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                "methodName": "<init>",
-        		"methodDesc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V"
-            },
-            "transformer": function(methodNode) {
-            	print("[JMTSUPERTRANS] ServerWorldCollections116 Transformer Called");
-            	
-            	toParallelHashSets(methodNode);
-				toParallelDeque(methodNode);
-            	
-            	print("[JMTSUPERTRANS] ServerWorldCollections116 Transformer Complete");
-            	
-            	return methodNode;
-            }
-    	},
-    	//onBlockStateChange
+    	// ServerLevel.onBlockStateChange (neighbour updates)
     	'ServerWorldOnBlockStateChange': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                "methodName": "func_217393_a",
-        		"methodDesc": "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;Lnet/minecraft/block/BlockState;)V"
+                'class': 'net.minecraft.server.level.ServerLevel',
+                "methodName": "onBlockStateChange",
+        		"methodDesc": "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/block/state/BlockState;)V"
             },
             "transformer": synchronizeMethod("ServerWorldOnBlockStateChange")
     	},
-		// Unsure as to justification for existance so disabling
-		/*
-    	//processUpdates net.minecraft.world.lighting.LevelBasedGraph func_215483_b(I)I
-    	'LevelBasedGraph-processUpdates': {
+    	// ServerLevel.runBlockEvents - drains the blockEvents queue; guard against
+    	// concurrent blockEvent() adds from other world threads
+    	'ServerWorldRunBlockEvents': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.lighting.LevelBasedGraph',
-                "methodName": "func_215483_b",
-        		"methodDesc": "(I)I"
+                'class': 'net.minecraft.server.level.ServerLevel',
+                "methodName": "runBlockEvents",
+        		"methodDesc": "()V"
             },
-            "transformer": synchronizeMethod("LevelBasedGraph-processUpdates")
+            "transformer": synchronizeMethod("ServerWorldRunBlockEvents")
     	},
-    	//public net.minecraft.world.lighting.LevelBasedGraph func_215469_a(JJIZ)V # scheduleUpdate
-    	'LevelBasedGraph-scheduleUpdate': {
+    	// ServerLevel.blockEvent - queue for runBlockEvents / runQueuedBlockEvents
+    	'ServerWorldBlockEvent': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.lighting.LevelBasedGraph',
-                "methodName": "func_215469_a",
-        		"methodDesc": "(JJIZ)V"
+                'class': 'net.minecraft.server.level.ServerLevel',
+                "methodName": "blockEvent",
+        		"methodDesc": "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/Block;II)V"
             },
-            "transformer": synchronizeMethod("LevelBasedGraph-scheduleUpdate")
+            "transformer": synchronizeMethod("ServerWorldBlockEvent")
     	},
-		*/
-    	'POIManager_func_219149_a_': {
+    	'ServerWorldClearBlockEvents': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.village.PointOfInterestManager',
-                "methodName": "func_219149_a",
-        		"methodDesc": "(Lnet/minecraft/util/math/ChunkPos;Ljava/lang/Integer;)Ljava/util/Optional"
+                'class': 'net.minecraft.server.level.ServerLevel',
+                "methodName": "clearBlockEvents",
+        		"methodDesc": "(Lnet/minecraft/world/level/levelgen/structure/BoundingBox;)V"
             },
-            "transformer": synchronizeMethod("POIManager_func_219149_a_")
+            "transformer": synchronizeMethod("ServerWorldClearBlockEvents")
     	},
+    	// PoiManager shared maps
+    	'PoiManagerAdd': {
+            'target': {
+                'type': 'METHOD',
+                'class': 'net.minecraft.world.entity.ai.village.poi.PoiManager',
+                "methodName": "add",
+        		"methodDesc": "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Holder;)V"
+            },
+            "transformer": synchronizeMethod("PoiManagerAdd")
+    	},
+    	'PoiManagerRemove': {
+            'target': {
+                'type': 'METHOD',
+                'class': 'net.minecraft.world.entity.ai.village.poi.PoiManager',
+                "methodName": "remove",
+        		"methodDesc": "(Lnet/minecraft/core/BlockPos;)V"
+            },
+            "transformer": synchronizeMethod("PoiManagerRemove")
+    	},
+    	'PoiManagerGetInChunk': {
+            'target': {
+                'type': 'METHOD',
+                'class': 'net.minecraft.world.entity.ai.village.poi.PoiManager',
+                "methodName": "getInChunk",
+        		"methodDesc": "(Ljava/util/function/Predicate;Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/world/entity/ai/village/poi/PoiManager$Occupancy;)Ljava/util/stream/Stream;"
+            },
+            "transformer": synchronizeMethod("PoiManagerGetInChunk")
+    	},
+    	'PoiManagerGetType': {
+            'target': {
+                'type': 'METHOD',
+                'class': 'net.minecraft.world.entity.ai.village.poi.PoiManager',
+                "methodName": "getType",
+        		"methodDesc": "(Lnet/minecraft/core/BlockPos;)Ljava/util/Optional;"
+            },
+            "transformer": synchronizeMethod("PoiManagerGetType")
+    	},
+    	// Swap vanilla ServerChunkCache for our parallel implementation
     	'ServerWorldParaProvider': {
     		'target': {
                 'type': 'CLASS',
-                'name': 'net.minecraft.world.server.ServerWorld'
+                'name': 'net.minecraft.server.level.ServerLevel'
             },
             "transformer": function(classNode) {
             	print("[JMTSUPERTRANS] ServerWorldParaProvider Transformer Called");
-            	
+
             	var opcodes = Java.type('org.objectweb.asm.Opcodes');
             	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
             	var MethodType = asmapi.MethodType;
-            	
-            	var tgtdesc = "(Lnet/minecraft/world/storage/SaveHandler;Ljava/util/concurrent/Executor;Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/World;Lnet/minecraft/world/dimension/Dimension;)Lnet/minecraft/world/chunk/AbstractChunkProvider;"
-            		
-        		var methods = classNode.methods;
-            		
-        		for (var i in methods) {
+
+            	var callClass = "net/minecraft/server/level/ServerChunkCache";
+            	var callDesc = "(Lnet/minecraft/server/level/ServerLevel;"
+            			+ "Lnet/minecraft/world/level/storage/LevelStorageSource$LevelStorageAccess;"
+            			+ "Lcom/mojang/datafixers/DataFixer;"
+            			+ "Lnet/minecraft/world/level/levelgen/structure/templatesystem/StructureTemplateManager;"
+            			+ "Ljava/util/concurrent/Executor;"
+            			+ "Lnet/minecraft/world/level/chunk/ChunkGenerator;"
+            			+ "IIZ"
+            			+ "Lnet/minecraft/server/level/progress/ChunkProgressListener;"
+            			+ "Lnet/minecraft/world/level/entity/ChunkStatusUpdateListener;"
+            			+ "Ljava/util/function/Supplier;)V";
+
+            	var methods = classNode.methods;
+
+            	for (var i in methods) {
             		var method = methods[i];
-            		
-            		if (!method.desc.equals(tgtdesc)) {
+
+            		var callTarget = asmapi.findFirstMethodCallAfter(method, MethodType.SPECIAL,
+            				callClass, "<init>", callDesc, 0);
+
+            		if (callTarget == null) {
             			continue;
             		}
-            		
+
             		print("[JMTSUPERTRANS] Matched method " + method.name + " " + method.desc);
-            		
-            		var callMethod = "<init>";
-            		var callClass = "net/minecraft/world/server/ServerChunkProvider";
-            		var callDesc = "(Lnet/minecraft/world/server/ServerWorld;Ljava/io/File;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/world/gen/feature/template/TemplateManager;Ljava/util/concurrent/Executor;Lnet/minecraft/world/gen/ChunkGenerator;ILnet/minecraft/world/chunk/listener/IChunkStatusListener;Ljava/util/function/Supplier;)V";
-            	
-            		var callTarget = asmapi.findFirstMethodCallAfter(method, MethodType.SPECIAL, 
-            				callClass, callMethod, callDesc, 0);
-            		
-            		if (callTarget == null) {
-            			print("[JMTSUPERTRANS] MISSING TARGET INSN");
-            			return;
-            		}
-            		
-            		var tgtMethod = callMethod;
+
             		var tgtClass = "org/jmt/mcmt/paralelised/ParaServerChunkProvider";
-            		var tgtDesc = callDesc;
-            		
+
             		var newTgt = callTarget;
-					
-					while (newTgt.getOpcode() != opcodes.NEW) {
-						newTgt = newTgt.getPrevious();
-					}
-            		
+            		while (newTgt != null && newTgt.getOpcode() != opcodes.NEW) {
+            			newTgt = newTgt.getPrevious();
+            		}
+
+            		if (newTgt == null) {
+            			print("[JMTSUPERTRANS] MISSING NEW INSN");
+            			return classNode;
+            		}
+
             		callTarget.owner = tgtClass;
-            		callTarget.name = tgtMethod;
-            		callTarget.desc = tgtDesc;
-            		
+
             		newTgt.desc = tgtClass;
-        		}
-            		
-        		print("[JMTSUPERTRANS] ServerWorldParaProvider Transformer Complete");
-            	
+            	}
+
+            	print("[JMTSUPERTRANS] ServerWorldParaProvider Transformer Complete");
+
             	return classNode;
             }
-    	},
-    	'ServerWorldParaProvider116': {
-    		'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                'methodName': "<init>",
-                'methodDesc': "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V"
-            },
-            "transformer": function(method) {
-            	print("[JMTSUPERTRANS] ServerWorldParaProvider116 Transformer Called");
-            	
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var MethodType = asmapi.MethodType;
-        		
-        		print("[JMTSUPERTRANS] Matched method " + method.name + " " + method.desc);
-        		
-        		var callMethod = "<init>";
-        		var callClass = "net/minecraft/world/server/ServerChunkProvider";
-        		var callDesc = "(Lnet/minecraft/world/server/ServerWorld;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/world/gen/feature/template/TemplateManager;Ljava/util/concurrent/Executor;Lnet/minecraft/world/gen/ChunkGenerator;IZLnet/minecraft/world/chunk/listener/IChunkStatusListener;Ljava/util/function/Supplier;)V"
-        	
-        		var callTarget = asmapi.findFirstMethodCallAfter(method, MethodType.SPECIAL, 
-        				callClass, callMethod, callDesc, 0);
-        		
-        		if (callTarget == null) {
-        			print("[JMTSUPERTRANS] MISSING TARGET INSN");
-        			return;
-        		}
-        		
-        		var tgtMethod = callMethod;
-        		var tgtClass = "org/jmt/mcmt/paralelised/ParaServerChunkProvider";
-        		var tgtDesc = callDesc;
-        		
-        		var newTgt = callTarget;
-				
-				while (newTgt.getOpcode() != opcodes.NEW) {
-					newTgt = newTgt.getPrevious();
-				}
-        		
-        		callTarget.owner = tgtClass;
-        		callTarget.name = tgtMethod;
-        		callTarget.desc = tgtDesc;
-        		
-        		newTgt.desc = tgtClass;
-            		
-        		print("[JMTSUPERTRANS] ServerWorldParaProvider Transformer Complete");
-            	
-            	return method;
-            }
-    	},
-    	'ServerWorldParaProvider1162': {
-    		'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.server.ServerWorld',
-                'methodName': "<init>",
-                'methodDesc': "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V",
-            },
-            "transformer": function(method) {
-            	print("[JMTSUPERTRANS] ServerWorldParaProvider116 Transformer Called");
-            	
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var MethodType = asmapi.MethodType;
-        		
-        		print("[JMTSUPERTRANS] Matched method " + method.name + " " + method.desc);
-        		
-        		var callMethod = "<init>";
-        		var callClass = "net/minecraft/world/server/ServerChunkProvider";
-        		var callDesc = "(Lnet/minecraft/world/server/ServerWorld;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/world/gen/feature/template/TemplateManager;Ljava/util/concurrent/Executor;Lnet/minecraft/world/gen/ChunkGenerator;IZLnet/minecraft/world/chunk/listener/IChunkStatusListener;Ljava/util/function/Supplier;)V"
-        	
-        		var callTarget = asmapi.findFirstMethodCallAfter(method, MethodType.SPECIAL, 
-        				callClass, callMethod, callDesc, 0);
-        		
-        		if (callTarget == null) {
-        			print("[JMTSUPERTRANS] MISSING TARGET INSN");
-        			return;
-        		}
-        		
-        		var tgtMethod = callMethod;
-        		var tgtClass = "org/jmt/mcmt/paralelised/ParaServerChunkProvider";
-        		var tgtDesc = callDesc;
-        		
-        		var newTgt = callTarget;
-				
-				while (newTgt.getOpcode() != opcodes.NEW) {
-					newTgt = newTgt.getPrevious();
-				}
-        		
-        		callTarget.owner = tgtClass;
-        		callTarget.name = tgtMethod;
-        		callTarget.desc = tgtDesc;
-        		
-        		newTgt.desc = tgtClass;
-            		
-        		print("[JMTSUPERTRANS] ServerWorldParaProvider Transformer Complete");
-            	
-            	return method;
-            }
-    	},
-    	'PlayerEntityRemoveQueueSync': {
-    		'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.entity.player.ServerPlayerEntity',
-                'methodName': "<init>",
-                'methodDesc': "(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/world/server/ServerWorld;Lcom/mojang/authlib/GameProfile;Lnet/minecraft/server/management/PlayerInteractionManager;)V"
-            },
-            "transformer": function(methodNode) {
-            	print("[JMTSUPERTRANS] PlayerEntityRemoveQueueSync Transformer Called");
-            	
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	var instructions = methodNode.instructions;
-            	            	
-            	var callMethod = "newLinkedList";
-        		var callClass = "com/google/common/collect/Lists";
-        		var callDesc = "()Ljava/util/LinkedList;";
-        		
-        		var callTarget = asmapi.findFirstMethodCallAfter(methodNode, MethodType.STATIC, 
-        				callClass, callMethod, callDesc, 0);
-        		
-        		var newClass = "org/jmt/mcmt/paralelised/ConcurrentDoublyLinkedList"
-        		
-        		var il = new InsnList();
-        		il.add(new InsnNode(opcodes.POP));
-            	il.add(new TypeInsnNode(opcodes.NEW, newClass));
-            	il.add(new InsnNode(opcodes.DUP));
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			newClass, "<init>", "()V", false));
-            	
-            	instructions.insert(callTarget, il);
-            	            	
-            	print("[JMTSUPERTRANS] PlayerEntityRemoveQueueSync Transformer Complete");
-            	
-            	return methodNode;
-            }
-    	},
-		'TemplateManagerHashMap': {
-            'target': {
-                'type': 'METHOD',
-                'class': 'net.minecraft.world.gen.feature.template.TemplateManager',
-                "methodName": "<init>",
-        		"methodDesc": "(Lnet/minecraft/resources/IResourceManager;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lcom/mojang/datafixers/DataFixer;)V"
-            },
-            "transformer": function(methodNode) {
-				var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TemplateManagerHashMap Transformer Called");
-            	
-            	toParallelHashMaps(methodNode);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TemplateManagerHashMap Transformer Complete");
-            	
-            	return methodNode;
-            }
-    	},
-		'TicketManagerCollections': {
-			'target': {
-                'type': 'CLASS',
-                'name': 'net.minecraft.world.server.TicketManager'
-            },
-            "transformer": function(classNode) {
-	            var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TicketManagerCollections Transformer Called");
-            	
-				for (methodid in classNode.methods) {
-					var methodNode = classNode.methods[methodid];
-					if (methodNode.name != "<init>") {
-    					continue;
-    				}
-					asmapi.log("INFO", "[JMTSUPERTRANS] TicketManagerCollections Hit Init");
-					/*
-					var insn = methodNode.instructions.getFirst();
-					while (insn != null) {
-						printInsnNode(insn);
-						insn = insn.getNext();
-					}
-					*/
-					toParallelHashMaps(methodNode);
-					toParallelDeque(methodNode);
-					toParallelHashSets(methodNode);
-				}
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TicketManagerCollections Transformer Complete");
-            	
-            	return classNode;
-            }
-		},
-		'ThreadTaskExecutorCollections': {
-			'target': {
-                'type': 'CLASS',
-                'name': 'net.minecraft.util.concurrent.ThreadTaskExecutor'
-            },
-            "transformer": function(classNode) {
-	            var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	asmapi.log("INFO", "[JMTSUPERTRANS] ThreadTaskExecutorCollections Transformer Called");
-            	
-				for (methodid in classNode.methods) {
-					var methodNode = classNode.methods[methodid];
-					if (methodNode.name != "<init>") {
-    					continue;
-    				}
-					asmapi.log("INFO", "[JMTSUPERTRANS] ThreadTaskExecutorCollections Hit Init");
-					/*
-					var insn = methodNode.instructions.getFirst();
-					while (insn != null) {
-						printInsnNode(insn);
-						insn = insn.getNext();
-					}
-					*/
-					toParallelHashMaps(methodNode);
-					toParallelDeque(methodNode);
-					toParallelHashSets(methodNode);
-				}
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] ThreadTaskExecutorCollections Transformer Complete");
-            	
-            	return classNode;
-            }
-		}
-		
-		
+    	}
+    	/*
+    	 * Removed on 1.20.1 (nothing left to transform):
+    	 *  - ServerWorldCollections*: ServerLevel ctor no longer initialises Sets/Queues
+    	 *    collections (block-event queue handled by ASMHookTerminator instead)
+    	 *  - PlayerEntityRemoveQueueSync: ServerPlayer removeQueue removed in 1.19+
+    	 *  - TemplateManagerHashMap: StructureTemplateManager already uses newConcurrentMap
+    	 *  - TicketManagerCollections: TicketManager merged into ChunkMap in 1.17+
+    	 *  - ThreadTaskExecutorCollections: BlockableEventLoop already uses
+    	 *    Queues.newConcurrentLinkedQueue for pendingRunnables
+    	 */
     }
 }

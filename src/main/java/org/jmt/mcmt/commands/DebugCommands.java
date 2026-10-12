@@ -6,86 +6,91 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.datafixers.util.Pair;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.Commands;
-import net.minecraft.command.arguments.ILocationArgument;
-import net.minecraft.command.arguments.Vec3Argument;
-import net.minecraft.command.impl.LocateCommand;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.ServerPlayerEntity;
-import net.minecraft.nbt.CompoundNBT;
-import net.minecraft.tileentity.ITickableTileEntity;
-import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.text.ITextComponent;
-import net.minecraft.util.text.StringTextComponent;
-import net.minecraft.world.gen.feature.structure.Structure;
-import net.minecraft.world.server.ServerWorld;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+
+import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.nbt.CompoundTag;
+
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.server.level.ServerLevel;
 
 public class DebugCommands {
 
-	public static LiteralArgumentBuilder<CommandSource> registerDebug(LiteralArgumentBuilder<CommandSource> root) {
+	public static LiteralArgumentBuilder<CommandSourceStack> registerDebug(LiteralArgumentBuilder<CommandSourceStack> root) {
 		return root.then(Commands.literal("getBlockState")
 				.then(Commands.argument("location", Vec3Argument.vec3()).executes(cmdCtx -> {
-					ILocationArgument loc = Vec3Argument.getLocation(cmdCtx, "location");
-					BlockPos bp = loc.getBlockPos(cmdCtx.getSource());
-					ServerWorld sw = cmdCtx.getSource().getWorld();
+					Vec3 loc = Vec3Argument.getVec3(cmdCtx, "location");
+					BlockPos bp = BlockPos.containing(loc);
+					ServerLevel sw = cmdCtx.getSource().getLevel();
 					BlockState bs = sw.getBlockState(bp);
-					StringTextComponent message = new StringTextComponent(
-							"Block at " + bp + " is " + bs.getBlock().getRegistryName());
-					cmdCtx.getSource().sendFeedback(message, true);
+					Component message = Component.literal(
+							"Block at " + bp + " is " + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(bs.getBlock()));
+					cmdCtx.getSource().sendSuccess(() -> message, true);
 					System.out.println(message.toString());
 					return 1;
 				}))).then(Commands.literal("nbtdump")
 						.then(Commands.argument("location", Vec3Argument.vec3()).executes(cmdCtx -> {
-							ILocationArgument loc = Vec3Argument.getLocation(cmdCtx, "location");
-							BlockPos bp = loc.getBlockPos(cmdCtx.getSource());
-							ServerWorld sw = cmdCtx.getSource().getWorld();
+							Vec3 loc = Vec3Argument.getVec3(cmdCtx, "location");
+							BlockPos bp = BlockPos.containing(loc);
+							ServerLevel sw = cmdCtx.getSource().getLevel();
 							BlockState bs = sw.getBlockState(bp);
-							TileEntity te = sw.getTileEntity(bp);
+							BlockEntity te = sw.getBlockEntity(bp);
 							if (te == null) {
-								StringTextComponent message = new StringTextComponent(
-										"Block at " + bp + " is " + bs.getBlock().getRegistryName() + " has no NBT");
-								cmdCtx.getSource().sendFeedback(message, true);
+								Component message = Component.literal(
+										"Block at " + bp + " is " + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(bs.getBlock()) + " has no NBT");
+								cmdCtx.getSource().sendSuccess(() -> message, true);
 							}
-							CompoundNBT nbt = te.serializeNBT();
-							ITextComponent itc = nbt.toFormattedComponent();
-							StringTextComponent message = new StringTextComponent(
-									"Block at " + bp + " is " + bs.getBlock().getRegistryName() + " with TE NBT:");
-							cmdCtx.getSource().sendFeedback(message, true);
-							cmdCtx.getSource().sendFeedback(itc, true);
+							CompoundTag nbt = te.serializeNBT();
+							Component itc = Component.literal(nbt.getAsString());
+							Component message = Component.literal(
+									"Block at " + bp + " is " + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(bs.getBlock()) + " with TE NBT:");
+							cmdCtx.getSource().sendSuccess(() -> message, true);
+							cmdCtx.getSource().sendSuccess(() -> itc, true);
 							//System.out.println(message.toString());
 							return 1;
 				}))).then(Commands.literal("tick").requires(cmdSrc -> {
-					return cmdSrc.hasPermissionLevel(2);
+					return cmdSrc.hasPermission(2);
 				}).then(Commands.literal("te"))
 						.then(Commands.argument("location", Vec3Argument.vec3()).executes(cmdCtx -> {
-							ILocationArgument loc = Vec3Argument.getLocation(cmdCtx, "location");
-							BlockPos bp = loc.getBlockPos(cmdCtx.getSource());
-							ServerWorld sw = cmdCtx.getSource().getWorld();
-							TileEntity te = sw.getTileEntity(bp);
-							if (te instanceof ITickableTileEntity) {
-								((ITickableTileEntity) te).tick();
-								StringTextComponent message = new StringTextComponent(
-										"Ticked " + te.getClass().getName() + " at " + bp);
-								cmdCtx.getSource().sendFeedback(message, true);
+							Vec3 loc = Vec3Argument.getVec3(cmdCtx, "location");
+							BlockPos bp = BlockPos.containing(loc);
+							ServerLevel sw = cmdCtx.getSource().getLevel();
+							BlockEntity te = sw.getBlockEntity(bp);
+							if (te != null) {
+								// 1.18+ ticks block entities through BlockEntityTicker wrappers;
+								// a direct tick call no longer exists, so just report presence.
+								Component message = Component.literal(
+										te.getClass().getName() + " at " + bp + " ticks via its BlockEntityTicker");
+								cmdCtx.getSource().sendSuccess(() -> message, true);
 							} else {
-								StringTextComponent message = new StringTextComponent("No tickable TE at " + bp);
-								cmdCtx.getSource().sendErrorMessage(message);
+								Component message = Component.literal("No TE at " + bp);
+								cmdCtx.getSource().sendFailure(message);
 							}
 							return 1;
 						})))
 				.then(Commands.literal("classpathDump").requires(cmdSrc -> {
-					return cmdSrc.hasPermissionLevel(2);
+					return cmdSrc.hasPermission(2);
 				}).executes(cmdCtx -> {
 					Path base = Paths.get("classpath_dump/");
 					try {
@@ -111,43 +116,57 @@ public class DebugCommands {
 					});
 					
 					
-					StringTextComponent message = new StringTextComponent("Classpath Dumped to: " + base.toAbsolutePath().toString());
-					cmdCtx.getSource().sendFeedback(message, true);
+					Component message = Component.literal("Classpath Dumped to: " + base.toAbsolutePath().toString());
+					cmdCtx.getSource().sendSuccess(() -> message, true);
 					System.out.println(message.toString());
 					return 1;
 				}))
 				/* 1.16.1 code; AKA the only thing that changed  */
 				.then(Commands.literal("test").requires(cmdSrc -> {
-					return cmdSrc.hasPermissionLevel(2);
+					return cmdSrc.hasPermission(2);
 				}).then(Commands.literal("structures").executes(cmdCtx -> {
-					ServerPlayerEntity p = cmdCtx.getSource().asPlayer();
-					BlockPos srcpos = p.getPosition();
-					UUID id = PlayerEntity.getUUID(p.getGameProfile());
+					ServerPlayer p = cmdCtx.getSource().getPlayer();
+					BlockPos srcpos = p.blockPosition();
+					UUID id = p.getUUID();
 					int index = structureIdx.computeIfAbsent(id.toString(), (s) -> new AtomicInteger()).getAndIncrement();
-					Structure<?>[] targets = net.minecraftforge.registries.ForgeRegistries.STRUCTURE_FEATURES.getValues().toArray(new Structure<?>[10]);
-					Structure<?> target = null;
-					if (index >= targets.length) {
-						target = targets[0];
-						structureIdx.computeIfAbsent(id.toString(), (s) -> new AtomicInteger()).set(0);
-					} else {
-						target = targets[index];
+					ServerLevel level = cmdCtx.getSource().getLevel();
+					net.minecraft.core.Registry<Structure> structureRegistry =
+							level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
+					List<net.minecraft.resources.ResourceLocation> targets = new ArrayList<>(structureRegistry.keySet());
+					if (targets.isEmpty()) {
+						cmdCtx.getSource().sendSuccess(() -> Component.literal("No structures registered!"), true);
+						return 0;
 					}
-					BlockPos dst = cmdCtx.getSource().getWorld().func_241117_a_(target, srcpos, 100, false);
-					if (dst == null) {
-						StringTextComponent message = new StringTextComponent("Failed locating " + target.getStructureName() + " from " + srcpos);
-						cmdCtx.getSource().sendFeedback(message, true);
+					net.minecraft.resources.ResourceLocation target = targets.get(Math.abs(index) % targets.size());
+					if (index >= targets.size()) {
+						structureIdx.computeIfAbsent(id.toString(), (s) -> new AtomicInteger()).set(0);
+					}
+					ResourceKey<Structure> targetKey = ResourceKey.create(net.minecraft.core.registries.Registries.STRUCTURE, target);
+					Structure targetStructure = structureRegistry.get(target);
+					if (targetStructure == null) {
+						cmdCtx.getSource().sendSuccess(() -> Component.literal("Failed to resolve structure " + target), true);
+						return 0;
+					}
+					HolderSet<Structure> holderSet = HolderSet.direct(structureRegistry.wrapAsHolder(targetStructure));
+					Pair<BlockPos, Holder<Structure>> result = level.getChunkSource().getGenerator()
+							.findNearestMapStructure(level, holderSet, srcpos, 100, false);
+					if (result == null) {
+						Component message = Component.literal("Failed locating " + target + " from " + srcpos);
+						cmdCtx.getSource().sendSuccess(() -> message, true);
 						return 1;
 					}
-					p.teleportKeepLoaded(dst.getX(), srcpos.getY(), dst.getZ());
-					LocateCommand.func_241054_a_(cmdCtx.getSource(), target.getStructureName(), srcpos, dst, "commands.locate.success");
+					BlockPos dst = result.getFirst();
+					p.connection.teleport((double) dst.getX(), (double) srcpos.getY(), (double) dst.getZ(), p.getXRot(), p.getYRot());
+					Component message = Component.literal("Located " + target + " at " + dst.toShortString());
+					cmdCtx.getSource().sendSuccess(() -> message, true);
 					return 1;
 				})))
 				/* */
 				/*
 				.then(Commands.literal("goinf").requires(cmdSrc -> {
-					return cmdSrc.hasPermissionLevel(2);
+					return cmdSrc.hasPermission(2);
 				}).executes(cmdCtx -> {
-					ServerPlayerEntity p = cmdCtx.getSource().asPlayer();
+					ServerPlayer p = cmdCtx.getSource().getPlayer();
 					p.setPosition(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY);
 					return 1;
 				}))

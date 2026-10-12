@@ -1,11 +1,12 @@
 package org.jmt.mcmt.serdes;
 
-import net.minecraft.tileentity.ITickableTileEntity;
-import net.minecraft.entity.Entity;
+
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 public enum SerDesHookTypes implements ISerDesHookType {
 	EntityTick(Entity.class),
-	TETick(ITickableTileEntity.class);
+	TETick(BlockEntity.class);
 	
 	Class<?> clazz;
 	

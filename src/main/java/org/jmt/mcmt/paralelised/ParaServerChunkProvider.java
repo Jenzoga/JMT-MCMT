@@ -20,26 +20,20 @@ import org.jmt.mcmt.config.GeneralConfig;
 
 import com.mojang.datafixers.DataFixer;
 
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.IChunk;
-import net.minecraft.world.chunk.listener.IChunkStatusListener;
-import net.minecraft.world.gen.ChunkGenerator;
-import net.minecraft.world.gen.feature.template.TemplateManager;
-import net.minecraft.world.server.ServerChunkProvider;
-import net.minecraft.world.server.ServerWorld;
-import net.minecraft.world.storage.DimensionSavedDataManager;
+import net.minecraft.server.level.ServerChunkCache;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.progress.ChunkProgressListener;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.entity.ChunkStatusUpdateListener;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
+import net.minecraft.world.level.storage.DimensionDataStorage;
+import net.minecraft.world.level.storage.LevelStorageSource;
 
-/* 1.16.1 code; AKA the only thing that changed  */
-import net.minecraft.world.storage.SaveFormat.LevelSave;
-/* */
-
-/* 1.15.2 code; AKA the only thing that changed  
-import java.io.File;
-/* */
-
-public class ParaServerChunkProvider extends ServerChunkProvider {
+public class ParaServerChunkProvider extends ServerChunkCache {
 
 	protected Map<ChunkCacheAddress, ChunkCacheLine> chunkCache = new ConcurrentHashMap<ChunkCacheAddress, ChunkCacheLine>();
 	protected AtomicInteger access = new AtomicInteger(Integer.MIN_VALUE);
@@ -49,55 +43,43 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 	Logger log = LogManager.getLogger();
 	Marker chunkCleaner = MarkerManager.getMarker("ChunkCleaner");
 
-	/* 1.16.1 code; AKA the only thing that changed  */
-	public ParaServerChunkProvider(ServerWorld worldIn, LevelSave worldDirectory, DataFixer dataFixer,
-			TemplateManager templateManagerIn, Executor executorIn, ChunkGenerator chunkGeneratorIn, int viewDistance,
-			boolean spawnHostiles, IChunkStatusListener p_i51537_8_, Supplier<DimensionSavedDataManager> p_i51537_9_) {
+	public ParaServerChunkProvider(ServerLevel worldIn, LevelStorageSource.LevelStorageAccess worldDirectory, DataFixer dataFixer,
+			StructureTemplateManager templateManagerIn, Executor executorIn, ChunkGenerator chunkGeneratorIn,
+			int viewDistance, int simulationDistance, boolean spawnHostiles, ChunkProgressListener statusListener,
+			ChunkStatusUpdateListener chunkStatusListener, Supplier<DimensionDataStorage> savedDataManagerIn) {
 		super(worldIn, worldDirectory, dataFixer, templateManagerIn, executorIn, chunkGeneratorIn, viewDistance,
-				spawnHostiles, p_i51537_8_, p_i51537_9_);
-		cacheThread = new Thread(this::chunkCacheCleanup, "Chunk Cache Cleaner " + worldIn.func_234923_W_().func_240901_a_().getPath());
+				simulationDistance, spawnHostiles, statusListener, chunkStatusListener, savedDataManagerIn);
+		cacheThread = new Thread(this::chunkCacheCleanup, "Chunk Cache Cleaner " + worldIn.dimension().location().getPath());
 		cacheThread.start();
 	}
-	/* */
-	
-	/* 1.15.2 code; AKA the only thing that changed  
-	public ParaServerChunkProvider(ServerWorld worldIn, File worldDirectory, DataFixer dataFixer,
-			TemplateManager templateManagerIn, Executor executorIn, ChunkGenerator<?> chunkGeneratorIn,
-			int viewDistance, IChunkStatusListener p_i51537_8_, Supplier<DimensionSavedDataManager> p_i51537_9_) {
-		super(worldIn, worldDirectory, dataFixer, templateManagerIn, executorIn, chunkGeneratorIn, viewDistance, p_i51537_8_,
-				p_i51537_9_);
-		cacheThread = new Thread(this::chunkCacheCleanup, "Chunk Cache Cleaner " + worldIn.dimension.getType().getId());
-		cacheThread.start();
-	}
-	/* */
-	
+
 	@Override
 	@Nullable
-	public IChunk getChunk(int chunkX, int chunkZ, ChunkStatus requiredStatus, boolean load) {
+	public ChunkAccess getChunk(int chunkX, int chunkZ, ChunkStatus requiredStatus, boolean load) {
 		if (GeneralConfig.disabled || GeneralConfig.disableChunkProvider) {
 			if (ASMHookTerminator.isThreadPooled("Main", Thread.currentThread())) {
 				return CompletableFuture.supplyAsync(() -> {
 		            return this.getChunk(chunkX, chunkZ, requiredStatus, load);
-		         }, this.executor).join();
+		         }, this.mainThreadProcessor).join();
 			}
 			return super.getChunk(chunkX, chunkZ, requiredStatus, load);
 		}
 		if (ASMHookTerminator.isThreadPooled("Main", Thread.currentThread())) {
 			return CompletableFuture.supplyAsync(() -> {
 	            return this.getChunk(chunkX, chunkZ, requiredStatus, load);
-	         }, this.executor).join();
+	         }, this.mainThreadProcessor).join();
 		}
-		
+
 		long i = ChunkPos.asLong(chunkX, chunkZ);
 
-		IChunk c = lookupChunk(i, requiredStatus, false);
+		ChunkAccess c = lookupChunk(i, requiredStatus, false);
 		if (c != null) {
 			return c;
 		}
-		
+
 		//log.debug("Missed chunk " + i + " on status "  + requiredStatus.toString());
-		
-		IChunk cl;
+
+		ChunkAccess cl;
 		if (ASMHookTerminator.shouldThreadChunks()) {
 			// Multithread but still limit to 1 load op per chunk
 			long[] locks = loadingChunkLock.lock(i, 0);
@@ -120,39 +102,37 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 		cacheChunk(i, cl, requiredStatus);
 		return cl;
 	}
-	
+
 	@SuppressWarnings("unused")
-	private IChunk getChunkyThing(long chunkPos, ChunkStatus requiredStatus, boolean load) {
-		IChunk cl;
+	private ChunkAccess getChunkyThing(long chunkPos, ChunkStatus requiredStatus, boolean load) {
+		ChunkAccess cl;
 		synchronized (this) {
 			cl = super.getChunk(ChunkPos.getX(chunkPos), ChunkPos.getZ(chunkPos), requiredStatus, load);
 		}
 		return cl;
 	}
 
-	/* 1.15.2/1.16.2 */
 	@Override
 	@Nullable
-	public Chunk getChunkNow(int chunkX, int chunkZ) {
+	public LevelChunk getChunkNow(int chunkX, int chunkZ) {
 		if (GeneralConfig.disabled) {
 			return super.getChunkNow(chunkX, chunkZ);
 		}
 		long i = ChunkPos.asLong(chunkX, chunkZ);
 
-		IChunk c = lookupChunk(i, ChunkStatus.FULL, false);
+		ChunkAccess c = lookupChunk(i, ChunkStatus.FULL, false);
 		if (c != null) {
-			return (Chunk) c;
+			return (LevelChunk) c;
 		}
-		
+
 		//log.debug("Missed chunk " + i + " now");
 
-		Chunk cl = super.getChunkNow(chunkX, chunkZ);
+		LevelChunk cl = super.getChunkNow(chunkX, chunkZ);
 		cacheChunk(i, cl, ChunkStatus.FULL);
 		return cl;
 	}
-	/* */
 
-	public IChunk lookupChunk(long chunkPos, ChunkStatus status, boolean compute) {
+	public ChunkAccess lookupChunk(long chunkPos, ChunkStatus status, boolean compute) {
 		int oldaccess = access.getAndIncrement();
 		if (access.get() < oldaccess) {
 			// Long Rollover so super rare
@@ -166,10 +146,10 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 			return ccl.getChunk();
 		}
 		return null;
-		
+
 	}
 
-	public void cacheChunk(long chunkPos, IChunk chunk, ChunkStatus status) {
+	public void cacheChunk(long chunkPos, ChunkAccess chunk, ChunkStatus status) {
 		long oldaccess = access.getAndIncrement();
 		if (access.get() < oldaccess) {
 			// Long Rollover so super rare
@@ -185,7 +165,7 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 	}
 
 	public void chunkCacheCleanup() {
-		while (world == null || world.getServer() == null) {
+		while (level == null || level.getServer() == null) {
 			log.debug(chunkCleaner, "ChunkCleaner Waiting for startup");
 			try {
 				Thread.sleep(1000);
@@ -193,7 +173,7 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 				e.printStackTrace();
 			}
 		}
-		while (world.getServer().isServerRunning()) {
+		while (level.getServer().isRunning()) {
 			try {
 				Thread.sleep(50);
 			} catch (InterruptedException e) {
@@ -215,23 +195,23 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 		}
 		log.debug(chunkCleaner, "ChunkCleaner terminating");
 	}
-	
+
 	protected class ChunkCacheAddress {
-		
+
 		protected long chunk;
 		protected ChunkStatus status;
-		
+
 		public ChunkCacheAddress(long chunk, ChunkStatus status) {
 			super();
 			this.chunk = chunk;
 			this.status = status;
 		}
-		
+
 		@Override
 		public int hashCode() {
 			return Long.hashCode(chunk) ^ status.hashCode();
 		}
-		
+
 		@Override
 		public boolean equals(Object obj) {
 			if (obj instanceof ChunkCacheAddress) {
@@ -244,19 +224,19 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 	}
 
 	protected class ChunkCacheLine {
-		WeakReference<IChunk> chunk;
+		WeakReference<ChunkAccess> chunk;
 		int lastAccess;
 
-		public ChunkCacheLine(IChunk chunk) {
+		public ChunkCacheLine(ChunkAccess chunk) {
 			this(chunk, access.get());
 		}
 
-		public ChunkCacheLine(IChunk chunk, int lastAccess) {
+		public ChunkCacheLine(ChunkAccess chunk, int lastAccess) {
 			this.chunk = new WeakReference<>(chunk);
 			this.lastAccess = lastAccess;
 		}
 
-		public IChunk getChunk() {
+		public ChunkAccess getChunk() {
 			return chunk.get();
 		}
 
@@ -268,7 +248,7 @@ public class ParaServerChunkProvider extends ServerChunkProvider {
 			lastAccess = access.get();
 		}
 
-		public void updateChunkRef(IChunk c) {
+		public void updateChunkRef(ChunkAccess c) {
 			if (chunk.get() == null) {
 				chunk = new WeakReference<>(c);
 			}

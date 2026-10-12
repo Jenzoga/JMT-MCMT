@@ -3,10 +3,10 @@ package org.jmt.mcmt.asmdest;
 import java.util.HashSet;
 import java.util.Set;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 
 public class PatchHookTerminator {
 
@@ -20,10 +20,10 @@ public class PatchHookTerminator {
 	
 	//TODO Add config for this
 	@SuppressWarnings("deprecation")
-	public static boolean OnCollisionFix(BlockState bs, World w, BlockPos p, Entity e) {
+	public static boolean OnCollisionFix(BlockState bs, Level w, BlockPos p, Entity e) {
 		if (onCollisionFixBypassClass.contains(bs.getBlock().getClass())) {
-			synchronized (bs.getBlock()) {			
-				bs.getBlock().onEntityCollision(bs, w, p, e);
+			synchronized (bs.getBlock()) {
+				bs.entityInside(w, p, e);
 			}
 			return true;
 		}

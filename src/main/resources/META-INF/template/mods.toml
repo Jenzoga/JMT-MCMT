@@ -2,7 +2,7 @@ license="BSD 2 Clause"
 # The name of the mod loader type to load - for regular FML @Mod mods it should be javafml
 modLoader="javafml"
 # A version range to match for said mod loader - for regular FML @Mod it will be the forge version
-loaderVersion="[31,)"
+loaderVersion="[@FORGE_VER@,)"
 # A URL to refer people to when problems occur with this mod
 issueTrackerURL="https://github.com/jediminer543/JMT-MCMT/issues"
 # A list of mods - how many allowed here is determined by the individual mod loader
@@ -13,15 +13,17 @@ version="${file.jarVersion}" #mandatory
 displayName="JMT MCMT"
 displayURL="https://github.com/jediminer543/JMT-MCMT"
 updateJSONURL="https://gitcdn.link/repo/jediminer543/JMT-MCMT/master/etc/update.json"
-# logoFile="examplemod.png" #optional
+# The authors and credits fields are used by CurseForge
 credits="The glorious power of Coremods" #optional
 authors="jediminer543"
-# The description text for the mod (multi line!) (#mandatory)
+# A file name (not a URL) relative to the resources file that should be loaded to provide 'better' descriptions for the mod on the Modpacks site
 description='''
-A bunch of core mod based assembly hacks that allow for the parallelised running of mineccraft
+A bunch of core mod based assembly hacks that allow for the parallelised running of minecraft
 
 Absurd, likely incompatible with everything, but somehow works
 '''
+# Required so CurseForge/FML know this needs Java 17
+javaVersion="17"
 [[dependencies.jmt_mcmt]] #optional
     modId="forge"
     mandatory=true

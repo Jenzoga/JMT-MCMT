@@ -6,7 +6,7 @@ import javax.management.NotificationBroadcasterSupport;
 
 import org.jmt.mcmt.asmdest.DebugHookTerminator;
 
-import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fml.ModList;
 
 /**

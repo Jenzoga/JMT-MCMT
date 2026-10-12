@@ -8,8 +8,8 @@ import org.jmt.mcmt.serdes.SerDesRegistry;
 import org.jmt.mcmt.serdes.pools.ChunkLockPool;
 import org.jmt.mcmt.serdes.pools.ISerDesPool;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 
 
 /**
@@ -34,7 +34,7 @@ public class AutoFilter implements ISerDesFilter {
 	}
 	
 	@Override
-	public void serialise(Runnable task, Object obj, BlockPos bp, World w, ISerDesHookType hookType) {
+	public void serialise(Runnable task, Object obj, BlockPos bp, Level w, ISerDesHookType hookType) {
 		pool.serialise(task, obj, bp, w, null);
 	}
 

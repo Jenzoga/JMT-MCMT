@@ -32,9 +32,9 @@ import org.jmt.mcmt.serdes.pools.ISerDesPool.ISerDesOptions;
 
 import com.google.common.collect.Lists;
 
-import net.minecraft.tileentity.PistonTileEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.piston.PistonMovingBlockEntity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 
 /**
  * Fully modular filtering
@@ -205,13 +205,13 @@ public class SerDesRegistry {
 				isLocking = true;
 			}
 			// Apparently a string starts with check is faster than Class.getPackage; who knew (I didn't)
-			if (!isLocking && GeneralConfig.chunkLockModded && !tte.getClass().getName().startsWith("net.minecraft.tileentity.")) {
+			if (!isLocking && GeneralConfig.chunkLockModded && !tte.getClass().getName().startsWith("net.minecraft.world.level.block.entity.")) {
 				isLocking = true;
 			}
 			if (isLocking && GeneralConfig.teWhiteList.contains(tte.getClass())) {
 				isLocking = false;
 			}
-			if (tte instanceof PistonTileEntity) {
+			if (tte instanceof PistonMovingBlockEntity) {
 				isLocking = true;
 			}
 			return isLocking;
@@ -229,7 +229,7 @@ public class SerDesRegistry {
 		}
 		
 		@Override
-		public void serialise(Runnable task, Object obj, BlockPos bp, World w, ISerDesHookType hookType) {
+		public void serialise(Runnable task, Object obj, BlockPos bp, Level w, ISerDesHookType hookType) {
 			if (!unknown.contains(obj.getClass())) {
 				ClassMode mode = ClassMode.UNKNOWN;
 				for (ISerDesFilter isdf : filters) {

@@ -1,101 +1,91 @@
-function printInsnNode(printTgt) {
-	print(printTgt+"|"+printTgt.opcode
-			+"|"+printTgt.desc+"|"+printTgt.owner+"|"+printTgt.name+"|"+printTgt["var"])
-}
-
 function initializeCoreMod() {
     return {
         'chunkLoadCache': {
             'target': {
                 'type': 'CLASS',
-                'name': 'net.minecraft.world.server.ServerChunkProvider'
-                	
+                'name': 'net.minecraft.server.level.ServerChunkCache'
             },
             'transformer': function(classNode) {
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var JumpInsnNode = Java.type("org.objectweb.asm.tree.JumpInsnNode");
-				var AbstractInsnNode = Java.type("org.objectweb.asm.tree.AbstractInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] ChunkLoadCache Transformer Called");
+                var opcodes = Java.type('org.objectweb.asm.Opcodes');
+                var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
+                var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
+                var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
+                var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
+                var JumpInsnNode = Java.type("org.objectweb.asm.tree.JumpInsnNode");
+                var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
+                var AbstractInsnNode = Java.type("org.objectweb.asm.tree.AbstractInsnNode");
+                var MethodType = asmapi.MethodType;
 
-            	var methods = classNode.methods;
-            	
-            	var targetMethodName = asmapi.mapMethod("func_212849_a_"); 
-            	var targetMethodDesc = "(IILnet/minecraft/world/chunk/ChunkStatus;Z)Lnet/minecraft/world/chunk/IChunk;";
-            	
-            	for (var i in methods) {
-            		var method = methods[i];
-            		
-            		if (!method.name.equals(targetMethodName)) {
-            			continue;
-            		} else if (!method.desc.equals(targetMethodDesc)) {
-            			continue;
-            		}
-            		asmapi.log("DEBUG", "[JMTSUPERTRANS] Matched method " + method.name + " " + method.desc);
-            		
-            		var instructions = method.instructions;
-            		
-            		var jumpStartMethod = asmapi.mapMethod("func_77272_a");
-            		var jumpStartClass = "net/minecraft/util/math/ChunkPos";
-            		var jumpStartDesc = "(II)J";
-            		
-            		var jumpStartTargetPre = asmapi.findFirstMethodCallAfter(method, MethodType.STATIC, 
-            				jumpStartClass, jumpStartMethod, jumpStartDesc, 0);
-            		
-					// Should be LSTORE 6
-					var jumpStartTarget = jumpStartTargetPre.getNext();
-					//printInsnNode(jumpStartTargetPre);
-					//printInsnNode(jumpStartTarget); 
-					if (jumpStartTarget.getOpcode() != opcodes.LSTORE) {
-						asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING START TARGET INSN");
-            			return classNode;
-					}
-					
-            		var jumpEndTargetPre = jumpStartTarget;
+                asmapi.log("INFO", "[JMTSUPERTRANS] ChunkLoadCache Transformer Called");
 
-					while  (jumpEndTargetPre != null) {
-						if (jumpEndTargetPre.getType() == AbstractInsnNode.LDC_INSN) {
-							if (jumpEndTargetPre.cst == "getChunkCacheMiss") {
-								break;
-							}
-						}
-						jumpEndTargetPre = jumpEndTargetPre.getNext();
-					}
-					
-					if (jumpEndTargetPre == null) {
-            			asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING END PRE TARGET INSN");
-            			return classNode;
-            		}
-					
-					jumpEndTarget = jumpEndTargetPre.getPrevious();
-            		
-            		if (jumpEndTarget.getOpcode() != opcodes.ALOAD) {
-            			asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING END TARGET INSN");
-            			return classNode;
-            		}
-            		
-            		// Jump instruction
-            		var skipTarget = new LabelNode();
-            		            		
-            		var il = new InsnList();
-            		il.add(new MethodInsnNode(opcodes.INVOKESTATIC, 
-            				"org/jmt/mcmt/asmdest/ASMHookTerminator", "shouldThreadChunks",
-            				"()Z" ,false));
-            		il.add(new JumpInsnNode(opcodes.IFNE, skipTarget));
-            		
-            		instructions.insert(jumpStartTarget, il);
-            		instructions.insertBefore(jumpEndTarget, skipTarget);
-            		
-            		asmapi.log("INFO", "[JMTSUPERTRANS] ChunkLoadCache Transformer Complete");
-            		
-            		break;
-            	}
-            	return classNode;
+                var methods = classNode.methods;
+
+                // 1.20.1: ServerChunkCache.getChunk(int,int,ChunkStatus,boolean)
+                var targetMethodName = "getChunk";
+                var targetMethodDesc = "(IILnet/minecraft/world/level/chunk/ChunkStatus;Z)Lnet/minecraft/world/level/chunk/ChunkAccess;";
+
+                for (var i in methods) {
+                    var method = methods[i];
+
+                    if (!method.name.equals(targetMethodName)) {
+                        continue;
+                    } else if (!method.desc.equals(targetMethodDesc)) {
+                        continue;
+                    }
+                    asmapi.log("DEBUG", "[JMTSUPERTRANS] Matched method " + method.name + " " + method.desc);
+
+                    var instructions = method.instructions;
+
+                    // Locate the getChunkFutureMainThread call; the future is stored in the
+                    // local right after it (ASTORE)
+                    var futureCall = asmapi.findFirstMethodCallAfter(method, MethodType.VIRTUAL,
+                            "net/minecraft/server/level/ServerChunkCache", "getChunkFutureMainThread",
+                            "(IILnet/minecraft/world/level/chunk/ChunkStatus;Z)Ljava/util/concurrent/CompletableFuture;", 0);
+                    if (futureCall == null) {
+                        asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING getChunkFutureMainThread INSN");
+                        return classNode;
+                    }
+                    var futureStore = futureCall.getNext();
+                    if (futureStore == null || futureStore.getOpcode() != opcodes.ASTORE) {
+                        asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING FUTURE STORE INSN");
+                        return classNode;
+                    }
+                    var futureSlot = futureStore["var"];
+
+                    // The managedBlock call that blocks the thread until the future completes
+                    var blockCall = asmapi.findFirstMethodCallAfter(method, MethodType.VIRTUAL,
+                            "net/minecraft/server/level/ServerChunkCache$MainThreadExecutor", "managedBlock",
+                            "(Ljava/util/function/BooleanSupplier;)V", 0);
+                    if (blockCall == null) {
+                        asmapi.log("ERROR", "[JMTSUPERTRANS] MISSING managedBlock INSN");
+                        return classNode;
+                    }
+
+                    // if (shouldThreadChunks()) DebugHookTerminator.chunkLoadDrive(scp, future, x, z);
+                    var skipTarget = new LabelNode();
+
+                    var il = new InsnList();
+                    il.add(new MethodInsnNode(opcodes.INVOKESTATIC,
+                            "org/jmt/mcmt/asmdest/ASMHookTerminator", "shouldThreadChunks", "()Z", false));
+                    il.add(new JumpInsnNode(opcodes.IFEQ, skipTarget));
+                    il.add(new VarInsnNode(opcodes.ALOAD, 0));       // ServerChunkCache this
+                    il.add(new VarInsnNode(opcodes.ALOAD, futureSlot)); // completablefuture
+                    il.add(new VarInsnNode(opcodes.ILOAD, 1));       // chunk x param
+                    il.add(new VarInsnNode(opcodes.ILOAD, 2));       // chunk z param
+                    il.add(new MethodInsnNode(opcodes.INVOKESTATIC,
+                            "org/jmt/mcmt/asmdest/DebugHookTerminator", "chunkLoadDrive",
+                            "(Lnet/minecraft/server/level/ServerChunkCache;Ljava/util/concurrent/CompletableFuture;II)V", false));
+
+                    // skipTarget lands on managedBlock itself: when threading is off the
+                    // drive block is skipped and vanilla blocking behaviour is preserved.
+                    instructions.insertBefore(blockCall, il);
+                    instructions.insertBefore(blockCall, skipTarget);
+
+                    asmapi.log("INFO", "[JMTSUPERTRANS] ChunkLoadCache Transformer Complete");
+
+                    break;
+                }
+                return classNode;
             }
         }
     }

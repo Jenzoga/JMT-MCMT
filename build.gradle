@@ -1,21 +1,22 @@
 buildscript {
     repositories {
-        maven { url = 'https://files.minecraftforge.net/maven' }
-        jcenter()
+        maven { url = 'https://maven.minecraftforge.net/' }
         mavenCentral()
     }
-    dependencies {
-        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '3.+', changing: true
-    }
 }
-apply plugin: 'net.minecraftforge.gradle'
-// Only edit below this line, the above code adds and enables the necessary things for Forge to be setup.
-apply plugin: 'eclipse'
-apply plugin: 'maven-publish'
+
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
 
 version = "${mcmt_ver}"
 group = 'org.jmt.mcmt' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
-archivesBaseName = "jmt_mcmt-${mc_ver}"
+base.archivesName = "jmt_mcmt-${mc_ver}"
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 sourceSets {
 	syncfu {
@@ -24,18 +25,16 @@ sourceSets {
 	}
 }
 
-sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8' // Need this here so eclipse task generates correctly.
+repositories {
+    maven { url = 'https://maven.minecraftforge.net/' }
+    mavenCentral()
+}
 
 println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
 minecraft {
-    // The mappings can be changed at any time, and must be in the following format.
-    // snapshot_YYYYMMDD   Snapshot are built nightly.
-    // stable_#            Stables are built at the discretion of the MCP team.
-    // Use non-default mappings at your own risk. they may not always work.
-    // Simply re-run your setup task after changing the mappings to update your workspace.
+    // 1.20.1 uses Mojang's official mappings (Mojmap); no MCP/SRG channel anymore.
     mappings channel: "${mappings_chan}", version: "${mappings_ver}"
-    // makeObfSourceJar = false // an Srg named sources jar is made by default. uncomment this to disable.
-    
+
     accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
 
     // Default run configurations.
@@ -46,15 +45,13 @@ minecraft {
 
             // Recommended logging level for the console
             property 'forge.logging.console.level', 'debug'
-            
-            //property 'forge.logging.markers', 'SCAN,REGISTRIES,REGISTRYDUMP'
 
             mods {
                 jmt_mcmt {
-                    source sourceSets.main                    
+                    source sourceSets.main
                 }
                 jmt_mcmt_syncfu {
-                	source sourceSets.syncfu
+                    source sourceSets.syncfu
                 }
             }
         }
@@ -64,15 +61,13 @@ minecraft {
 
             // Recommended logging level for the console
             property 'forge.logging.console.level', 'debug'
-            
-            //property 'forge.logging.markers', 'SCAN,REGISTRIES,REGISTRYDUMP'
 
             mods {
                 jmt_mcmt {
                     source sourceSets.main
                 }
                 jmt_mcmt_syncfu {
-                	source sourceSets.syncfu
+                    source sourceSets.syncfu
                 }
             }
         }
@@ -86,14 +81,14 @@ minecraft {
             // Recommended logging level for the console
             property 'forge.logging.console.level', 'debug'
 
-            args '--mod', 'examplemod', '--all', '--output', file('src/generated/resources/')
+            args '--mod', 'jmt_mcmt', '--all', '--output', file('src/generated/resources/')
 
             mods {
                 jmt_mcmt {
                     source sourceSets.main
                 }
                 jmt_mcmt_syncfu {
-                	source sourceSets.syncfu
+                    source sourceSets.syncfu
                 }
             }
         }
@@ -105,31 +100,12 @@ dependencies {
     // that the dep is a ForgeGradle 'patcher' dependency. And it's patches will be applied.
     // The userdev artifact is a special name and will get all sorts of transformations applied to it.
     minecraft "net.minecraftforge:forge:${mc_ver}-${fg_ver}"
-
-    // You may put jars on which you depend on in ./libs or you may define them like so..
-    // compile "some.group:artifact:version:classifier"
-    // compile "some.group:artifact:version"
-
-    // Real examples
-    // compile 'com.mod-buildcraft:buildcraft:6.0.8:dev'  // adds buildcraft to the dev env
-    // compile 'com.googlecode.efficient-java-matrix-library:ejml:0.24' // adds ejml to the dev env
-
-    // The 'provided' configuration is for optional dependencies that exist at compile-time but might not at runtime.
-    // provided 'com.mod-buildcraft:buildcraft:6.0.8:dev'
-
-    // These dependencies get remapped to your current MCP mappings
-    // deobf 'com.mod-buildcraft:buildcraft:6.0.8:dev'
-
-    // For more info...
-    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
-    // http://www.gradle.org/docs/current/userguide/dependency_management.html
-
 }
 
 // Example for how to get properties into the manifest for reading by the runtime..
-jar {	
+jar {
 	from sourceSets.main.output
-	classifier "modcore"
+	archiveClassifier = "modcore"
     manifest {
         attributes([
             "Specification-Title": "jmt_mcmt",
@@ -138,7 +114,9 @@ jar {
             "Implementation-Title": project.name,
             "Implementation-Version": "${version}",
             "Implementation-Vendor" :"jmtmakesthings",
-            "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+            "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+            // Coremods must be declared via manifest attribute since FML 1.17+
+            "CoreModFile": "META-INF/coremods.json"
         ])
     }
 }
@@ -149,9 +127,9 @@ task fullJar(type: Jar) {
 	from sourceSets.syncfu.output
 	from jar.outputs.files
 	dependsOn jar
-} 
+}
 
-configure(fullJar) {   
+configure(fullJar) {
 	group = 'Build'
 	description = 'Create the full mod'
 }
@@ -170,12 +148,12 @@ task generateModToml(type: Copy) {
 	from 'src/main/resources/META-INF/template'
     into 'src/main/resources/META-INF'
     filter(ReplaceTokens, tokens: [
-        FORGE_VER: fgMajor, 
+        FORGE_VER: fgMajor,
         MC_VER: mc_ver
     ])
 }
 
-configure(cleanModToml) {   
+configure(cleanModToml) {
 	group = 'Build'
 	description = 'Clean in the mod toml'
 }
@@ -184,7 +162,7 @@ clean.dependsOn cleanModToml
 generateModToml.dependsOn cleanModToml
 
 
-configure(generateModToml) {   
+configure(generateModToml) {
 	group = 'Build'
 	description = 'Fill in the mod toml'
 }
@@ -193,7 +171,7 @@ processResources.dependsOn generateModToml
 
 // Example configuration to allow publishing using the maven-publish task
 // This is the preferred method to reobfuscate your jar file
-jar.finalizedBy('reobfJar') 
+jar.finalizedBy('reobfJar')
 // However if you are in a multi-project build, dev time needs unobfed jar files, so you can delay the obfuscation until publishing by doing
 //publish.dependsOn('reobfJar')
 

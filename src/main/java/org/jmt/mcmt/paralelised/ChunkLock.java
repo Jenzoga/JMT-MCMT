@@ -8,8 +8,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.commons.lang3.ArrayUtils;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 
 public class ChunkLock {
 	
@@ -25,7 +25,7 @@ public class ChunkLock {
 	}
 	
 	public long[] lock(BlockPos bp, int radius) {
-		long cp = new ChunkPos(bp).asLong();
+		long cp = ChunkPos.asLong(bp);
 		return lock(cp, radius);
 	}
 	

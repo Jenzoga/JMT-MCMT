@@ -2,6 +2,22 @@
 
 Mostly here for my own sanity
 
+## 0.24.0-PRE (1.20.1 port)
+
+- Ported to Minecraft 1.20.1 / Forge 47.x (Java 17, ForgeGradle 6, Mojang official mappings)
+- All coremods rewritten for the 1.20.1 class layout:
+	- World tick loop moved to `MinecraftServer.tickChildren` (was `tickServer`)
+	- Entity ticks hook `ServerLevel.tickNonPassenger`; TE ticks hook `LevelChunk$BoundTickingBlockEntity.tick`
+	- Environment ticks hook `ServerChunkCache.tickChunks` -> `ServerLevel.tickChunk`
+	- `ServerTickList` replaced by `LevelTicks`; `ClassInheritanceMultiMap` by `ClassInstanceMultiMap`;
+	  `PalettedContainer` locking by `ThreadingDetector`; entity storage by `EntityLookup`
+- AccessTransformer entries switched to intermediary (`f_`/`m_`) names, required by FG6's AT application order
+- Disabled hooks (target classes removed or already thread-safe in 1.17+):
+	- `RecursiveEventLoop` ETP scheduling (etpparallel)
+	- `ServerTickList` self-repair, `RegionSectionCache`, `TicketManager` collections,
+	  `TemplateHashMap`, `PlayerRemoveQueue`, `LevelBasedGraph` (merged into ChunkMap)
+	- SCP drive debug hooks (folded into the chunk-load drive hook in chunkparallel)
+
 ## 0.11.19
 
 - Fixes the postTick event from forge; This was causing issues with SereneSeasons

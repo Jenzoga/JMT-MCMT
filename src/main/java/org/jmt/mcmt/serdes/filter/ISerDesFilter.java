@@ -7,12 +7,12 @@ import javax.annotation.Nullable;
 
 import org.jmt.mcmt.serdes.ISerDesHookType;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 
 public interface ISerDesFilter {
 
-	public void serialise(Runnable task, Object obj, BlockPos bp, World w, ISerDesHookType hookType);
+	public void serialise(Runnable task, Object obj, BlockPos bp, Level w, ISerDesHookType hookType);
 	
 	@Nullable
 	public default Set<Class<?>> getTargets() {

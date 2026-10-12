@@ -1,666 +1,144 @@
-//TODO
-/*
-function toParallelHashSets(classNode, fastOwner, concurrentOwner, methodMap, ignore=[]) {
-	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-	
-	var MethodType = asmapi.MethodType;
-	
-	var methods = classNode.methods;
-	
-	for (var i in methods) {
-		var methodNode = methods[i];
-		if (ignore.includes(methodNode.name)) {
-			continue;
-		}
-		var instructions = methodNode.instructions;
-		
-		
-	}
-	
-}
-*/
-
 function printInsnNode(printTgt) {
 	print(printTgt+"|"+printTgt.opcode
 			+"|"+printTgt.desc+"|"+printTgt.owner+"|"+printTgt.name+"|"+printTgt["var"])
 }
 
-function getFieldAccessAfter(methodNode, opcode, owner, name, descriptor, after) {
-	var FieldInsnNode = Java.type("org.objectweb.asm.tree.FieldInsnNode");
-	var node = methodNode.instructions.get(after);
-	while (node != null) {
-		if (node instanceof FieldInsnNode) {
-			if (node.getOpcode() == opcode &&
-				node.name.equals(name) && 
-				node.desc.equals(descriptor) &&
-				node.owner.equals(owner)) {
-				return node
-			}
-		}
-		node = node.getNext();
+function synchronizeMethod(debugLine) {
+	return function(methodNode) {
+		var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
+		var opcodes = Java.type('org.objectweb.asm.Opcodes');
+		asmapi.log("INFO", "[JMTSUPERTRANS] " + debugLine + " Transformer Called");
+		methodNode.access += opcodes.ACC_SYNCHRONIZED;
+		asmapi.log("INFO", "[JMTSUPERTRANS] " + debugLine + " Transformer Complete");
+		return methodNode;
 	}
-	return null;
-	
-}
-
-function synchronizeOn(methodNode, before, loadInsns) {
-	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-	
-	var instructions = methodNode.instructions;
-	
-	var startInsn = instructions.get(before);
-	
-	var il = new InsnList();
-	for (var insn in loadInsns) {
-		il.add(loadInsns[insn].clone(null));
-	}
-	il.add(new InsnNode(opcodes.MONITORENTER));
-	
-	instructions.insertBefore(startInsn, il);
-	
-	var tgtInsn = startInsn.getNext();
-	while (tgtInsn != null) {
-		if (tgtInsn.getOpcode() == opcodes.IRETURN ||
-				tgtInsn.getOpcode() == opcodes.LRETURN ||
-				tgtInsn.getOpcode() == opcodes.FRETURN ||
-				tgtInsn.getOpcode() == opcodes.DRETURN ||
-				tgtInsn.getOpcode() == opcodes.ARETURN ||
-				tgtInsn.getOpcode() == opcodes.RETURN) {
-			il = new InsnList();
-			for (var insn in loadInsns) {
-				il.add(loadInsns[insn].clone(null));
-			}
-			il.add(new InsnNode(opcodes.MONITOREXIT));
-			instructions.insert(tgtInsn, il);
-		}
-		tgtInsn = tgtInsn.getNext();
-	}
-	
-}
-
-function synchronizeMethod(methodNode, debugLine) {
-	print("[JMTSUPERTRANS] " + debugLine + " Transformer Called");
-	
-	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-	
-	methodNode.access += opcodes.ACC_SYNCHRONIZED;
-	
-	print("[JMTSUPERTRANS] " + debugLine + " Transformer Complete");
-	
-	return methodNode;
 }
 
 function initializeCoreMod() {
     return {
-    	'ServerWorldBlockPosFastUtkill': {
-    		'target': {
-                'type': 'CLASS',
-                'name': 'net.minecraft.world.server.ServerWorld'
-            },
-            "transformer": function(classNode) {
-            	print("[JMTSUPERTRANS] ServerWorldBlockPosFastUtkill Transformer Called");
-            	
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	var tgt = "it/unimi/dsi/fastutil/objects/ObjectLinkedOpenHashSet";
-            	var replace = "java/util/Deque";
-            	
-            	var fields = classNode.fields;
-            	
-            	var tgtField = asmapi.mapField("field_147490_S");
-            	
-            	for (var i in fields) {
-            		var fieldNode = fields[i];
-            		
-            		if (fieldNode.name != tgtField) {
-            			continue;
-            		}
-            		
-            		fieldNode.signature = fieldNode.signature.replace(tgt, replace);
-            		fieldNode.desc = fieldNode.desc.replace(tgt, replace);
-            		print(fieldNode.name + "|" + fieldNode.desc + "|" + fieldNode.signature);
-            	}
-            	
-            	var methods = classNode.methods;
-            	
-            	var targetMethods = {
-        			"<init>": {
-        				"desc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveHandler;Lnet/minecraft/world/storage/WorldInfo;Lnet/minecraft/world/dimension/DimensionType;Lnet/minecraft/profiler/IProfiler;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;)V",
-        				"fallbackdesc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V",
-        				"fallbackdesc2": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V",
-        				"update": function(methodNode) {
-        					var instructions = methodNode.instructions;
-        					
-        					var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, tgt, "<init>", "()V");
-        					//var newTgt = asmapi.findFirstInstructionBefore(methodNode, opcodes.NEW, instructions.indexOf(initTgt))
-        					var putTgt = asmapi.findFirstInstructionAfter(methodNode, opcodes.PUTFIELD, instructions.indexOf(initTgt))
-        					
-        					var newTgt = initTgt;
-        					
-        					while (newTgt.getOpcode() != opcodes.NEW) {
-        						newTgt = newTgt.getPrevious();
-        					}
-        					
-        					if (initTgt == null || newTgt == null || putTgt == null) {
-        						print("[JMTSUPERTRANS] MISSING TARGET INSN - INIT");
-        						return false;
-        					}
-        					
-        					newTgt.desc = "java/util/concurrent/ConcurrentLinkedDeque";
-        					initTgt.owner = "java/util/concurrent/ConcurrentLinkedDeque";
-    						putTgt.desc = putTgt.desc.replace(tgt, replace);
-    						
-        					/*
-    						var printTgt = newTgt.getPrevious().getPrevious();
-    						for (var i = 0; i < 30; i++) {
-    							printInsnNode(printTgt);
-    							printTgt = printTgt.getNext();
-    						}
-    						*/
-    						
-    						return true;
-        				}
-        			},
-            	}
-            	
-            	targetMethods[asmapi.mapMethod("func_175641_c")] = {
-            			"desc": "(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/Block;II)V",
-            			"update": function(methodNode) {
-            				
-            				var getTgt = asmapi.findFirstInstructionAfter(methodNode, opcodes.GETFIELD, 0)
-            				var addTgt = asmapi.findFirstMethodCall(methodNode, MethodType.VIRTUAL, tgt, "add", "(Ljava/lang/Object;)Z");
-            				
-            				if (addTgt == null || getTgt == null) {
-        						print("[JMTSUPERTRANS] MISSING TARGET INSN - addBlockEvent");
-        						return false;
-        					}
-            				
-            				getTgt.desc = getTgt.desc.replace(tgt, replace);
-            				addTgt.owner = replace;
-            				addTgt.setOpcode(opcodes.INVOKEINTERFACE);
-            				addTgt.itf = true;
-            				
-            				return true;
-            			}
-            	}
-            	
-            	targetMethods[asmapi.mapMethod("func_229854_a_")] = {
-            			"desc": "(Lnet/minecraft/util/math/MutableBoundingBox;)V",
-            			"update": function(methodNode) {
-            				
-            				var getTgt = asmapi.findFirstInstructionAfter(methodNode, opcodes.GETFIELD, 0)
-            				var addTgt = asmapi.findFirstMethodCall(methodNode, MethodType.VIRTUAL, tgt, "removeIf", "(Ljava/util/function/Predicate;)Z");
-            				
-            				if (addTgt == null || getTgt == null) {
-        						print("[JMTSUPERTRANS] MISSING TARGET INSN - addBlockEvent");
-        						return false;
-        					}
-            				
-            				getTgt.desc = getTgt.desc.replace(tgt, replace);
-            				addTgt.owner = replace;
-            				addTgt.setOpcode(opcodes.INVOKEINTERFACE);
-            				addTgt.itf = true;
-            				
-            				return true;
-            			}
-            	}
-            	
-            	targetMethods[asmapi.mapMethod("func_147488_Z")] = {
-            			"desc": "()V",
-            			"update": function(methodNode) {
-            				var instructions = methodNode.instructions;
-            				
-            				var getTgt = asmapi.findFirstInstructionAfter(methodNode, opcodes.GETFIELD, 0)
-            				
-            				var call = asmapi.buildMethodCall("org/jmt/mcmt/asmdest/ASMHookTerminator", 
-            						"sendQueuedBlockEvents", "(Ljava/util/Deque;Lnet/minecraft/world/server/ServerWorld;)V",  MethodType.STATIC)
-            						
-            				if (getTgt == null) {
-        						print("[JMTSUPERTRANS] MISSING TARGET INSN - addBlockEvent");
-        						return false;
-        					}
-            				
-            				getTgt.desc = getTgt.desc.replace(tgt, replace);
-            						
-            				var il = new InsnList();
-            				il.add(new VarInsnNode(opcodes.ALOAD, 0));
-            				il.add(call);
-            				il.add(new InsnNode(opcodes.RETURN));
-            				
-            				instructions.insert(getTgt, il);
-            				
-            				return true;
-            			}
-            	}
-            	
-            	for (var i in methods) {
-            		var methodNode = methods[i];
-            		
-            		var op = targetMethods[methodNode.name];
-            		if (op != undefined && (op.desc == methodNode.desc 
-            				|| op.fallbackdesc == methodNode.desc || op.fallbackdesc2 == methodNode.desc)) {
-            			if (op.fallbackdesc == methodNode.desc || op.fallbackdesc2 == methodNode.desc) {
-            				print("[JMTSUPERTRANS] 1.16 WARNING")
-            			}
-            			print("[JMTSUPERTRANS] updating method: " + methodNode.name + methodNode.desc)
-            			var result = op.update(methodNode)
-            			op.result = result;
-            		}
-            	}
-            	
-            	for (var o in targetMethods) {
-            		if (targetMethods[o].result != true) {
-            			print("[JMTSUPERTRANS] failed to update method: " + o + targetMethods[o].desc)
-            		}
-            	}
-            	
-            	
-            	
-            	return classNode;
-            }
-    	},
-    	'ServerWorldEntitiesByIdFastUtkill': {
-    		'target': {
-                'type': 'CLASS',
-                'name': 'net.minecraft.world.server.ServerWorld'
-            },
-            "transformer": function(classNode) {
-            	print("[JMTSUPERTRANS] ServerWorldEntitiesByIdFastUtkill Transformer Called");
-            	
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var FieldInsnNode = Java.type("org.objectweb.asm.tree.FieldInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var JumpInsnNode = Java.type("org.objectweb.asm.tree.JumpInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	var tgt = "it/unimi/dsi/fastutil/ints/Int2ObjectMap";
-            	var replace = "it/unimi/dsi/fastutil/ints/Int2ObjectMap";
-            	var fullReplace = "org/jmt/mcmt/paralelised/fastutil/Int2ObjectConcurrentHashMap";
-            	
-            	var methods = classNode.methods;
-            	
-            	var version = "";
-            	
-            	var targetMethods = {
-            			"<init>": { // "Same" for 115 and 1161
-            				"desc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveHandler;Lnet/minecraft/world/storage/WorldInfo;Lnet/minecraft/world/dimension/DimensionType;Lnet/minecraft/profiler/IProfiler;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;)V",
-            				"fallbackdesc": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V",
-            				"fallbackdesc2": "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V",
-            				"update": function(methodNode) {
-            					var instructions = methodNode.instructions;
-            					
-            					var initdesc1152 = "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveHandler;Lnet/minecraft/world/storage/WorldInfo;Lnet/minecraft/world/dimension/DimensionType;Lnet/minecraft/profiler/IProfiler;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;)V";
-            					//TODO USE
-            					//var initdesc1162 = "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;Lnet/minecraft/world/storage/SaveFormat$LevelSave;Lnet/minecraft/world/storage/IServerWorldInfo;Lnet/minecraft/util/RegistryKey;Lnet/minecraft/world/DimensionType;Lnet/minecraft/world/chunk/listener/IChunkStatusListener;Lnet/minecraft/world/gen/ChunkGenerator;ZJLjava/util/List;Z)V";
-            					
-            					if (methodNode.desc.equals(initdesc1152)) {
-            						version = "1152"
-            					} else {
-            						version = "1161"
-            					}
-            					print("[JMTSUPERTRANS] mcver:" + version);
-            					
-            					var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            							"it/unimi/dsi/fastutil/ints/Int2ObjectLinkedOpenHashMap", "<init>", "()V");
-            					var putTgt = asmapi.findFirstInstructionAfter(methodNode, opcodes.PUTFIELD, instructions.indexOf(initTgt))
-            					
-            					var newTgt = initTgt;
-            					
-            					while (newTgt.getOpcode() != opcodes.NEW) {
-            						newTgt = newTgt.getPrevious();
-            					}
-            					
-            					if (initTgt == null || newTgt == null || putTgt == null) {
-            						print("[JMTSUPERTRANS] MISSING TARGET INSN - INIT");
-            						return false;
-            					}
-            					
-            					newTgt.desc = fullReplace;
-            					initTgt.owner = fullReplace;
-        						putTgt.desc = putTgt.desc.replace(tgt, replace);
-        						
-        						return true;
-            				}
-            			},
-                	}
-            	
-            	
-            	for (var i in methods) {
-            		var methodNode = methods[i];
-            		
-            		var op = targetMethods[methodNode.name];
-            		if (op != undefined && (op.desc == methodNode.desc 
-            				|| op.fallbackdesc == methodNode.desc || op.fallbackdesc2 == methodNode.desc)) {
-            			if (op.fallbackdesc == methodNode.desc || op.fallbackdesc2 == methodNode.desc) {
-            				print("[JMTSUPERTRANS] 1.16 WARNING")
-            			}
-            			print("[JMTSUPERTRANS] updating method: " + methodNode.name + methodNode.desc)
-            			var result = op.update(methodNode)
-            			op.result = result;
-            		} 
-            	}
-            	
-            	for (var o in targetMethods) {
-            		if (targetMethods[o].result != true) {
-            			if (targetMethods[o]["not"+version]) {
-            				continue;
-            			}
-            			print("[JMTSUPERTRANS] failed to update method: " + o + targetMethods[o].desc)
-            		}
-            	}
-            	
-            	return classNode;
-            }
-    	},
-    	'LevelBasedGraph-UpdatesByLevel': {
+    	// EntityLookup replaces ServerWorld.entitiesById in 1.18+.
+    	// Swap the fastutil maps for our concurrent equivalents.
+    	'EntityLookupMaps': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.lighting.LevelBasedGraph',
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
                 "methodName": "<init>",
-        		"methodDesc": "(III)V"
+        		"methodDesc": "()V"
             },
             "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
             	var opcodes = Java.type('org.objectweb.asm.Opcodes');
             	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
             	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
             	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
             	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
+            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
             	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] LevelBasedGraph-UpdatesByLevel Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	//Using sync instead of concurrent as should be mostly single threaded; and should be faster
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/sync/SyncLongLinkedOpenHashSet"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/sync/SyncLongLinkedOpenHashSet", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] LevelBasedGraph-UpdatesByLevel Transformer Complete");
-            	
+
+            	asmapi.log("INFO", "[JMTSUPERTRANS] EntityLookupMaps Transformer Called");
+
+            	// byId: Int2ObjectLinkedOpenHashMap -> Int2ObjectConcurrentHashMap
+            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL,
+            			"it/unimi/dsi/fastutil/ints/Int2ObjectLinkedOpenHashMap", "<init>", "()V");
+            	if (initTgt != null) {
+            		var il = new InsnList();
+            		il.add(new InsnNode(opcodes.POP));
+            		il.add(new TypeInsnNode(opcodes.NEW,
+            				"org/jmt/mcmt/paralelised/fastutil/Int2ObjectConcurrentHashMap"));
+            		il.add(new InsnNode(opcodes.DUP));
+            		il.add(new MethodInsnNode(opcodes.INVOKESPECIAL,
+            				"org/jmt/mcmt/paralelised/fastutil/Int2ObjectConcurrentHashMap",
+            				"<init>", "()V", false));
+            		instructions = methodNode.instructions;
+            		instructions.insert(initTgt, il);
+            	} else {
+            		asmapi.log("WARN", "[JMTSUPERTRANS] EntityLookupMaps: byId init not found");
+            	}
+
+            	// byUuid: Maps.newHashMap -> ConcurrentCollections.newHashMap
+            	var mapInvoke = asmapi.findFirstMethodCallAfter(methodNode, MethodType.STATIC,
+            			"com/google/common/collect/Maps", "newHashMap", "()Ljava/util/HashMap;", 0);
+            	if (mapInvoke != null) {
+            		mapInvoke.owner = "org/jmt/mcmt/asmdest/ConcurrentCollections";
+            		mapInvoke.desc = "()Ljava/util/Map;";
+            	}
+
+            	asmapi.log("INFO", "[JMTSUPERTRANS] EntityLookupMaps Transformer Complete");
+
             	return methodNode;
             }
     	},
-    	'LevelBasedGraph-propagationLevels': {
+    	'EntityLookupGetEntities': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.lighting.LevelBasedGraph',
-                "methodName": "<init>",
-        		"methodDesc": "(III)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "getEntities",
+        		"methodDesc": "(Lnet/minecraft/world/level/entity/EntityTypeTest;Lnet/minecraft/util/AbortableIterationConsumer;)V"
             },
-            "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] LevelBasedGraph-propagationLevels Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"net/minecraft/world/lighting/LevelBasedGraph$2", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/Long2ByteConcurrentHashMap"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/Long2ByteConcurrentHashMap", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] LevelBasedGraph-propagationLevels Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupGetEntities")
     	},
-    	'RegionSectionCache-data': {
+    	'EntityLookupGetAllEntities': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.chunk.storage.RegionSectionCache',
-                "methodName": "<init>",
-        		"methodDesc": "(Ljava/io/File;Ljava/util/function/BiFunction;Ljava/util/function/Function;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/util/datafix/DefaultTypeReferences;)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "getAllEntities",
+        		"methodDesc": "()Ljava/lang/Iterable;"
             },
-            "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-data Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"it/unimi/dsi/fastutil/longs/Long2ObjectOpenHashMap", "<init>", "()V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/Long2ObjectConcurrentHashMap"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/Long2ObjectConcurrentHashMap", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-data Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupGetAllEntities")
     	},
-    	'RegionSectionCache-dirtySections': {
+    	'EntityLookupAdd': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.chunk.storage.RegionSectionCache',
-                "methodName": "<init>",
-        		"methodDesc": "(Ljava/io/File;Ljava/util/function/BiFunction;Ljava/util/function/Function;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/util/datafix/DefaultTypeReferences;)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "add",
+        		"methodDesc": "(Lnet/minecraft/world/level/entity/EntityAccess;)V"
             },
-            "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-dirtySections Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"it/unimi/dsi/fastutil/longs/LongLinkedOpenHashSet", "<init>", "()V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/ConcurrentLongLinkedOpenHashSet"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/ConcurrentLongLinkedOpenHashSet", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-dirtySections Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupAdd")
     	},
-    	'RegionSectionCache-data-116': {
+    	'EntityLookupRemove': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.chunk.storage.RegionSectionCache',
-                "methodName": "<init>",
-        		"methodDesc": "(Ljava/io/File;Ljava/util/function/Function;Ljava/util/function/Function;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/util/datafix/DefaultTypeReferences;Z)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "remove",
+        		"methodDesc": "(Lnet/minecraft/world/level/entity/EntityAccess;)V"
             },
-            "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-data Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"it/unimi/dsi/fastutil/longs/Long2ObjectOpenHashMap", "<init>", "()V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/Long2ObjectConcurrentHashMap"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/Long2ObjectConcurrentHashMap", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-data Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupRemove")
     	},
-    	'RegionSectionCache-dirtySections-116': {
+    	'EntityLookupGetEntityById': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.chunk.storage.RegionSectionCache',
-                "methodName": "<init>",
-        		"methodDesc": "(Ljava/io/File;Ljava/util/function/Function;Ljava/util/function/Function;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/util/datafix/DefaultTypeReferences;Z)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "getEntity",
+        		"methodDesc": "(I)Lnet/minecraft/world/level/entity/EntityAccess;"
             },
-            "transformer": function(methodNode) {
-            	//mv.visitMethodInsn(INVOKESPECIAL, "net/minecraft/world/lighting/LevelBasedGraph$1", "<init>", "(Lnet/minecraft/world/lighting/LevelBasedGraph;IFI)V", false);
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var VarInsnNode = Java.type("org.objectweb.asm.tree.VarInsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var FieldNode = Java.type("org.objectweb.asm.tree.FieldNode");
-            	var LabelNode = Java.type("org.objectweb.asm.tree.LabelNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-dirtySections Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"it/unimi/dsi/fastutil/longs/LongLinkedOpenHashSet", "<init>", "()V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/ConcurrentLongLinkedOpenHashSet"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/ConcurrentLongLinkedOpenHashSet", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] RegionSectionCache-dirtySections Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupGetEntityById")
     	},
-		'TicketManagerTickets': {
+    	'EntityLookupGetEntityByUuid': {
             'target': {
                 'type': 'METHOD',
-                'class': 'net.minecraft.world.server.TicketManager',
-                "methodName": "<init>",
-        		"methodDesc": "(Ljava/util/concurrent/Executor;Ljava/util/concurrent/Executor;)V"
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "getEntity",
+        		"methodDesc": "(Ljava/util/UUID;)Lnet/minecraft/world/level/entity/EntityAccess;"
             },
-            "transformer": function(methodNode) {
-
-            	var opcodes = Java.type('org.objectweb.asm.Opcodes');
-            	var asmapi = Java.type('net.minecraftforge.coremod.api.ASMAPI');
-            	var InsnList = Java.type("org.objectweb.asm.tree.InsnList");
-            	var InsnNode = Java.type("org.objectweb.asm.tree.InsnNode");
-            	var MethodInsnNode = Java.type("org.objectweb.asm.tree.MethodInsnNode");
-            	var TypeInsnNode = Java.type("org.objectweb.asm.tree.TypeInsnNode");
-            	var MethodType = asmapi.MethodType;
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TicketManagerTickets Transformer Called");
-            	
-            	var initTgt = asmapi.findFirstMethodCall(methodNode, MethodType.SPECIAL, 
-            			"it/unimi/dsi/fastutil/longs/Long2ObjectOpenHashMap", "<init>", "()V");
-            	
-            	var il = new InsnList();
-            	il.add(new InsnNode(opcodes.POP))
-            	il.add(new TypeInsnNode(opcodes.NEW, "org/jmt/mcmt/paralelised/fastutil/Long2ObjectOpenConcurrentHashMap"))
-            	il.add(new InsnNode(opcodes.DUP))
-            	il.add(new MethodInsnNode(opcodes.INVOKESPECIAL, 
-            			"org/jmt/mcmt/paralelised/fastutil/Long2ObjectOpenConcurrentHashMap", "<init>",
-            			"()V"))
-            			
-            	var instructions = methodNode.instructions;
-            	
-            	instructions.insert(initTgt, il);
-            	
-            	asmapi.log("INFO", "[JMTSUPERTRANS] TicketManagerTickets Transformer Complete");
-            	
-            	return methodNode;
-            }
+            "transformer": synchronizeMethod("EntityLookupGetEntityByUuid")
     	},
+    	'EntityLookupCount': {
+            'target': {
+                'type': 'METHOD',
+                'class': 'net.minecraft.world.level.entity.EntityLookup',
+                "methodName": "count",
+        		"methodDesc": "()I"
+            },
+            "transformer": synchronizeMethod("EntityLookupCount")
+    	}
+    	/*
+    	 * Removed on 1.20.1:
+    	 *  - ServerWorldBlockPosFastUtkill: blockEvents queue is now handled by
+    	 *    ASMHookTerminator.runQueuedBlockEvents + synchronisation in generalparallel
+    	 *  - ServerWorldEntitiesByIdFastUtkill: entitiesById moved into EntityLookup
+    	 *    (handled by EntityLookupMaps above)
+    	 *  - LevelBasedGraph-*: LevelBasedGraph removed (lighting rewrite)
+    	 *  - RegionSectionCache-*: RegionSectionCache removed in 1.17+
+    	 *  - TicketManagerTickets: TicketManager merged into ChunkMap in 1.17+
+    	 */
     }
 }
