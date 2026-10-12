@@ -92,32 +92,42 @@ function initializeCoreMod() {
             	asmapi.log("INFO", "[JMTSUPERTRANS] ThreadingDetector Transformer Called");
 
             	var instructions = methodNode.instructions;
-            	var insn = instructions.getFirst();
-            	var patchedStore = false;
-            	var patchedThrow = false;
 
+            	// Two-pass: locate targets first, then patch. ASM 9.7+ clears a
+            	// removed node's links, so mutating while iterating would stop the scan.
+            	var storeNode = null;
+            	var throwNode = null;
+            	var insn = instructions.getFirst();
             	while (insn != null) {
-            		if (!patchedStore && insn instanceof FieldInsnNode
+            		if (storeNode == null && insn instanceof FieldInsnNode
             				&& insn.getOpcode() == opcodes.PUTFIELD
             				&& insn.name.equals("threadThatFailedToAcquire")) {
-            			// Stack here: [this][thread]. Replace the PUTFIELD with POP POP
-            			// so both operands are dropped and the stack stays balanced.
-            			var il = new InsnList();
-            			il.add(new InsnNode(opcodes.POP));
-            			il.add(new InsnNode(opcodes.POP));
-            			instructions.insertBefore(insn, il);
-            			instructions.remove(insn);
-            			patchedStore = true;
-            		} else if (!patchedThrow && insn.getOpcode() == opcodes.ATHROW) {
-            			// Only the first ATHROW (the fullException throw). Replace it with
-            			// POP so we fall through to the finally block instead of throwing.
-            			var il2 = new InsnList();
-            			il2.add(new InsnNode(opcodes.POP));
-            			instructions.insertBefore(insn, il2);
-            			instructions.remove(insn);
-            			patchedThrow = true;
+            			storeNode = insn;
+            		} else if (throwNode == null && insn.getOpcode() == opcodes.ATHROW) {
+            			throwNode = insn;
             		}
             		insn = insn.getNext();
+            	}
+
+            	var patchedStore = storeNode != null;
+            	var patchedThrow = throwNode != null;
+
+            	if (storeNode != null) {
+            		// Stack here: [this][thread]. Replace the PUTFIELD with POP POP
+            		// so both operands are dropped and the stack stays balanced.
+            		var il = new InsnList();
+            		il.add(new InsnNode(opcodes.POP));
+            		il.add(new InsnNode(opcodes.POP));
+            		instructions.insertBefore(storeNode, il);
+            		instructions.remove(storeNode);
+            	}
+            	if (throwNode != null) {
+            		// The fullException throw. Replace it with POP so we fall through
+            		// to the finally block instead of throwing.
+            		var il2 = new InsnList();
+            		il2.add(new InsnNode(opcodes.POP));
+            		instructions.insertBefore(throwNode, il2);
+            		instructions.remove(throwNode);
             	}
 
             	if (!patchedStore || !patchedThrow) {

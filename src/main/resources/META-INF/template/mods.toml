@@ -12,7 +12,7 @@ modId="jmt_mcmt" #mandatory
 version="${file.jarVersion}" #mandatory
 displayName="JMT MCMT"
 displayURL="https://github.com/jediminer543/JMT-MCMT"
-updateJSONURL="https://gitcdn.link/repo/jediminer543/JMT-MCMT/master/etc/update.json"
+updateJSONURL="https://raw.githubusercontent.com/jediminer543/JMT-MCMT/master/etc/update.json"
 # The authors and credits fields are used by CurseForge
 credits="The glorious power of Coremods" #optional
 authors="jediminer543"

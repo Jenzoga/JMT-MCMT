@@ -4,7 +4,14 @@ Mostly here for my own sanity
 
 ## 0.24.0-PRE (1.20.1 port)
 
-- Ported to Minecraft 1.20.1 / Forge 47.x (Java 17, ForgeGradle 6, Mojang official mappings)
+- Ported to Minecraft 1.20.1 / Forge 47.4.13 (Java 17, ForgeGradle 6, Mojang official mappings)
+- ThreadingDetector patch made compatible with ASM 9.8 (Forge 47.4.x), which clears
+  removed instruction nodes' links and so broke the mutate-while-scanning loop
+- Packaging simplified to a single mod jar; the syncfu launcher jar, nested-jar
+  locator and `fullJar` task were removed (nothing in 1.20.1 uses the sync-fu
+  fastutil transforms; the concurrent collections are self-synchronising)
+- Update checker URL switched from the dead gitcdn.link mirror to
+  raw.githubusercontent.com, and `etc/update.json` gained a 1.20.1 section
 - All coremods rewritten for the 1.20.1 class layout:
 	- World tick loop moved to `MinecraftServer.tickChildren` (was `tickServer`)
 	- Entity ticks hook `ServerLevel.tickNonPassenger`; TE ticks hook `LevelChunk$BoundTickingBlockEntity.tick`

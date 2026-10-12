@@ -18,13 +18,6 @@ base.archivesName = "jmt_mcmt-${mc_ver}"
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
-sourceSets {
-	syncfu {
-		compileClasspath += sourceSets.main.runtimeClasspath
-		compileClasspath += sourceSets.main.compileClasspath
-	}
-}
-
 repositories {
     maven { url = 'https://maven.minecraftforge.net/' }
     mavenCentral()
@@ -50,9 +43,6 @@ minecraft {
                 jmt_mcmt {
                     source sourceSets.main
                 }
-                jmt_mcmt_syncfu {
-                    source sourceSets.syncfu
-                }
             }
         }
 
@@ -65,9 +55,6 @@ minecraft {
             mods {
                 jmt_mcmt {
                     source sourceSets.main
-                }
-                jmt_mcmt_syncfu {
-                    source sourceSets.syncfu
                 }
             }
         }
@@ -87,9 +74,6 @@ minecraft {
                 jmt_mcmt {
                     source sourceSets.main
                 }
-                jmt_mcmt_syncfu {
-                    source sourceSets.syncfu
-                }
             }
         }
     }
@@ -103,9 +87,10 @@ dependencies {
 }
 
 // Example for how to get properties into the manifest for reading by the runtime..
+// Single-jar packaging: this jar is the mod itself (mods.toml, coremods.json,
+// access transformer, JS coremod scripts and classes all live inside it).
 jar {
 	from sourceSets.main.output
-	archiveClassifier = "modcore"
     manifest {
         attributes([
             "Specification-Title": "jmt_mcmt",
@@ -120,21 +105,6 @@ jar {
         ])
     }
 }
-
-
-
-task fullJar(type: Jar) {
-	from sourceSets.syncfu.output
-	from jar.outputs.files
-	dependsOn jar
-}
-
-configure(fullJar) {
-	group = 'Build'
-	description = 'Create the full mod'
-}
-
-build.dependsOn fullJar
 
 task cleanModToml(type: Delete) {
   delete 'src/main/resources/META-INF/mods.toml'
