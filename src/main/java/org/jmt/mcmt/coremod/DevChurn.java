@@ -227,6 +227,25 @@ public final class DevChurn
                 org.jmt.mcmt.paralelised.ChunkLock.INSTANCE.unlock(locks);
             }
         }
+        // TE list churn: lazy-add (getTileEntity on random positions) and block-
+        // change remove paths mutate tickableTileEntities while updateEntities
+        // iterates it; pool-thread ITickable.update side effects hit the same lists
+        for (int k = 0; k < 8; k++)
+        {
+            BlockPos p = spawn.add(r.nextInt(64) - 32, r.nextInt(16), r.nextInt(64) - 32);
+            try
+            {
+                net.minecraft.tileentity.TileEntity te = ws.getTileEntity(p);
+                if (te instanceof net.minecraft.util.ITickable)
+                    ((net.minecraft.util.ITickable) te).update();
+                if (r.nextInt(100) < 5)
+                    ws.removeTileEntity(p);
+            }
+            catch (Throwable t)
+            {
+                record(t, "teChurn");
+            }
+        }
         // EntityTracker.tick iterates entries on this thread while pool-thread
         // spawn/remove reaches track/untrack through WorldServer.onEntity*
         EntityTracker et = ws.getEntityTracker();

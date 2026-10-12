@@ -503,12 +503,13 @@ public class MCMTClassTransformer implements IClassTransformer
                 new String[][] { { "net/minecraft/world/gen/ChunkProviderServer",
                         "net/minecraft/world/gen/ChunkProviderServer" },
                         { "net/minecraft/world/World" }, { "net/minecraft/world/World" },
-                        { "net/minecraft/world/World" } },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/World" } },
                 new String[][] { { "loadedChunks", "field_73244_f" }, entityField, unloadedField,
-                        { "weatherEffects", "field_73007_j" } },
+                        { "weatherEffects", "field_73007_j" },
+                        { "tickableTileEntities", "field_175730_i" } },
                 new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
-                        "Ljava/util/List;", "Ljava/util/List;" },
-                "loadedChunks+loadedEntityList+unloadedEntityList+weatherEffects");
+                        "Ljava/util/List;", "Ljava/util/List;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList+unloadedEntityList+weatherEffects+tickableTileEntities");
         // loadedChunks is the outermost lock everywhere: World.getChunk ->
         // provideChunk mutates the provider map from inside entity-lock holders,
         // and pool-thread provider-map holders reach entity lists via
@@ -530,6 +531,16 @@ public class MCMTClassTransformer implements IClassTransformer
                 "loadedChunks+loadedEntityList");
         synchronizeOnFields(cn, new String[] { "onEntityRemoved", "func_72847_b" },
                 "(Lnet/minecraft/entity/Entity;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { chunkMap, entityField },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList");
+        // WorldServer overrides updateEntityWithOptionalForce (spawn gating +
+        // super() into the World wrapper); without this override wrapper virtual
+        // dispatch from pool-thread setPosition bypasses the World wrapper.
+        synchronizeOnFields(cn, new String[] { "updateEntityWithOptionalForce", "func_72866_a" },
+                "(Lnet/minecraft/entity/Entity;Z)V",
                 new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
                         { "net/minecraft/world/World" } },
                 new String[][] { chunkMap, entityField },
@@ -982,6 +993,43 @@ public class MCMTClassTransformer implements IClassTransformer
                 new String[][] { chunkMapW, entityField },
                 new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
                 "loadedChunks+loadedEntityList");
+        // updateEntityWithOptionalForce mutates per-chunk entity lists (Chunk.
+        // addEntity/removeEntityAtIndex when an entity crosses chunk borders) and
+        // reads ForgeChunkManager.forcedChunks, while AABB queries iterate those
+        // lists — pool-thread Entity.setPosition hits it inside the entity tick
+        // (DevChurn CME at Chunk.getEntitiesOfTypeWithinAABB). loadedChunks first
+        // covers the forcedChunks read; tickable last matches updateEntities.
+        synchronizeOnFields(cn, new String[] { "updateEntityWithOptionalForce", "func_72866_a" },
+                "(Lnet/minecraft/entity/Entity;Z)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" }, { "net/minecraft/world/World" } },
+                new String[][] { chunkMapW, entityField,
+                        { "tickableTileEntities", "field_175730_i" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;",
+                        "Ljava/util/List;" },
+                "loadedChunks+loadedEntityList+tickableTileEntities");
+        // TE list mutations: pool-thread ITickable.update side effects reach
+        // addTileEntity/removeTileEntity (lazy TE add via getTileEntity, block
+        // changes) while updateEntities iterates tickableTileEntities on the
+        // server thread -> CME class. Both methods call getChunk internally, so
+        // loadedChunks goes first (same order as updateEntities); no entity
+        // locks inside their bodies, so tickable-at-the-end cannot invert.
+        synchronizeOnFields(cn, new String[] { "addTileEntity", "func_175700_a" },
+                "(Lnet/minecraft/tileentity/TileEntity;)Z",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { { "loadedChunks", "field_73244_f" },
+                        { "tickableTileEntities", "field_175730_i" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+tickableTileEntities");
+        synchronizeOnFields(cn, new String[] { "removeTileEntity", "func_175713_t" },
+                "(Lnet/minecraft/util/math/BlockPos;)V",
+                new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
+                        { "net/minecraft/world/World" } },
+                new String[][] { { "loadedChunks", "field_73244_f" },
+                        { "tickableTileEntities", "field_175730_i" } },
+                new String[] { "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;", "Ljava/util/List;" },
+                "loadedChunks+tickableTileEntities");
         synchronizeOnFields(cn, new String[] { "onEntityRemoved", "func_72847_b" },
                 "(Lnet/minecraft/entity/Entity;)V",
                 new String[][] { { "net/minecraft/world/gen/ChunkProviderServer", "net/minecraft/world/gen/ChunkProviderServer" },
