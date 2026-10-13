@@ -239,6 +239,15 @@ public class ASMHookTerminator {
 	}
 
 	/**
+	 * Bytecode hook entry for the tile-entity ticker: the injected code can only
+	 * reach the owning chunk, so the level is read here where field references are
+	 * remapped along with the rest of the class.
+	 */
+	public static boolean callTileEntityTick(TickingBlockEntity tbe, LevelChunk chunk) {
+		return callTileEntityTick(tbe, chunk != null ? chunk.level : null);
+	}
+
+	/**
 	 * Returns true if the tick was taken over (dispatched or run inline);
 	 * false means the caller should execute the original ticker itself.
 	 */
